@@ -68,6 +68,16 @@ make pyodide
 
 After these three steps the project is ready to build.
 
+### Physical device quick start
+
+- Connect the iPhone by USB, unlock it, trust the Mac if prompted, and finish pairing in Xcode.
+- Enable Developer Mode when Xcode asks for it. The setting appears only after pairing starts.
+- In Xcode, add the Apple account in Settings > Accounts, keep Automatically Manage Signing enabled, and assign the correct team.
+- Run the app once over USB before switching to Wi-Fi deployment.
+- Keep Low Power Mode off during development. Use Auto-Lock = 5 minutes as the default, and use Never only for charging bench sessions.
+- Use a clear inventory name such as `KERI Dev iPhone` so the device is easy to identify in Xcode and logs.
+- See [ios-xcode-workflow.instructions.md](docs/instructions/ios-xcode-workflow.instructions.md#physical-device-setup--readiness) for the full device-readiness guidance and the [one-page checklist](docs/instructions/ios-xcode-workflow.instructions.md#one-page-device-checklist).
+
 ---
 
 ## 3. Daily workflow
@@ -326,7 +336,7 @@ Fort-ios/
 | File | Covers |
 |------|--------|
 | [ios-swift-coding.instructions.md](docs/instructions/ios-swift-coding.instructions.md) | Swift style, naming, DI patterns, testing with swift-testing |
-| [ios-xcode-workflow.instructions.md](docs/instructions/ios-xcode-workflow.instructions.md) | Xcode build/CI workflow, anti-patterns catalog, `xcodebuild` reference |
+| [ios-xcode-workflow.instructions.md](docs/instructions/ios-xcode-workflow.instructions.md) | Xcode build/CI workflow, physical device setup, one-page device checklist, anti-patterns catalog, `xcodebuild` reference |
 | [ios-wkwebview-pyodide-bundled-payload.instructions.md](docs/instructions/ios-wkwebview-pyodide-bundled-payload.instructions.md) | WKWebView rules, scheme handler, worker architecture, telemetry bridge |
 | [branding-visual-identity.instructions.md](docs/instructions/branding-visual-identity.instructions.md) | KERI brand colors, logo variants, Swift color constants, CSS custom properties |
 | [pyodide-config.instructions.md](docs/instructions/pyodide-config.instructions.md) | Pyodide version, wheel sources, `unpackArchive` install pattern |
