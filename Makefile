@@ -8,8 +8,9 @@ TEST_RESULTS  := build/TestResults.xcresult
 ARCHIVE_PATH  := build/KeriWallet.xcarchive
 EXPORT_DIR    := build/export
 EXPORT_OPTS   := ExportOptions.plist
+APP_BUNDLE_ID := com.kerifoundation.wallet
 
-.PHONY: help setup pyodide sync build test-swift test-ts test-e2e test-e2e-slow test-all bridge-check lint lint-ts open clean archive export upload
+.PHONY: help setup pyodide sync build build-device run dev-sim dev-device logs-sim open-console test-swift test-ts test-e2e test-e2e-slow test-all bridge-check lint lint-ts open clean archive export upload
 
 help: ## Show available make targets
 	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | \
@@ -53,6 +54,27 @@ build: ## Build KeriWallet for iOS Simulator (Debug)
 	  -configuration Debug \
 	  -destination '$(SIMULATOR)' \
 	  -derivedDataPath $(DERIVED_DATA)
+
+build-device: sync ## Build KeriWallet for connected iOS device (Debug, auto-signing)
+	xcodebuild build \
+	  -project $(XCODE_PROJECT) \
+	  -scheme $(SCHEME) \
+	  -configuration Debug \
+	  -destination 'generic/platform=iOS' \
+	  -derivedDataPath $(DERIVED_DATA) \
+	  -allowProvisioningUpdates
+
+run: build-device ## Alias for device build
+
+dev-sim: sync lint-ts test-ts build ## Fast local loop: sync payload, validate TS, build for Simulator
+
+dev-device: sync lint-ts test-ts build-device ## Fast local loop: sync payload, validate TS, build for physical device
+
+logs-sim: ## Tail KeriWallet logs from the booted Simulator
+	xcrun simctl spawn booted log stream --style compact --predicate 'process == "KeriWallet"'
+
+open-console: ## Open macOS Console for physical device logs
+	open -a Console
 
 test-swift: ## Run Swift unit + UI tests on iOS Simulator
 	xcodebuild test \
