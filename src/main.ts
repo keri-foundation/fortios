@@ -78,12 +78,13 @@ async function saveProfile(): Promise<void> {
     const cmdId = generateId();
     const result = await sendToWorker({
         id: cmdId,
-        type: 'db_save',
-        key: `profile:${id}`,
+        type: 'db_put',
+        store: 'profile',
+        key: id,
         value: JSON.stringify(record),
     });
 
-    if (result.type === 'db_save_result' && result.ok) {
+    if (result.type === 'db_put_result' && result.ok) {
         setDbStatus(`Saved profile '${id}'.`);
         if (recordJsonEl) recordJsonEl.textContent = JSON.stringify(record, null, 2);
         log(`saved profile id=${id}`);
@@ -99,11 +100,12 @@ async function loadProfile(): Promise<void> {
     const cmdId = generateId();
     const result = await sendToWorker({
         id: cmdId,
-        type: 'db_load',
-        key: `profile:${id}`,
+        type: 'db_get',
+        store: 'profile',
+        key: id,
     });
 
-    if (result.type === 'db_load_result') {
+    if (result.type === 'db_get_result') {
         if (result.value === null) {
             setDbStatus(`No profile found for '${id}'.`, false);
             if (recordJsonEl) recordJsonEl.textContent = 'No record loaded.';
