@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { createBridgeAdapter } from '../bridge_adapter';
-import { BRIDGE_HANDLER_NAME } from '../bridge-contract';
-import type { BridgeEnvelope } from '../types';
+import { createBridgeAdapter } from './bridge_adapter';
+import { BRIDGE_HANDLER_NAME } from '../shared/bridge-contract';
+import type { BridgeEnvelope } from '../shared/types';
 
 const SAMPLE_ENVELOPE: BridgeEnvelope = {
     type: 'lifecycle',
