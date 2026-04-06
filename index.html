@@ -6,523 +6,217 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="color-scheme" content="dark light" />
   <title>KERI Wallet</title>
-  <style>
-    /* ─── Brand tokens (ADR-027) ────────────────────────────────────── */
-    :root {
-      /* Brand palette */
-      --keri-green: #61783e;
-      --keri-gold: #986c32;
-      --keri-black: #000000;
-
-      /* Backgrounds */
-      --bg-dark: #0d0d0f;
-      --bg-light: #f5f5f7;
-
-      /* Text */
-      --text-dark: #e8e8e8;
-      --text-light: #1d1d1f;
-      --text-muted-dark: #a0a0a8;
-      --text-muted-light: #6e6e73;
-
-      /* Status indicators */
-      --status-pending: #ff9f0a;
-      --status-error: #ff453a;
-      --status-done: var(--keri-green);
-
-      /* Spacing scale */
-      --space-xs: 8px;
-      --space-sm: 12px;
-      --space-md: 16px;
-      --space-lg: 20px;
-      --space-xl: 24px;
-
-      /* Timing — LOADING_FADE_MS in constants.ts must match --fade-duration */
-      --fade-duration: 0.4s;
-    }
-
-    /* ─── Reset ─────────────────────────────────────────────────────── */
-    *,
-    *::before,
-    *::after {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
-
-    html {
-      -webkit-text-size-adjust: 100%;
-      text-size-adjust: 100%;
-      color-scheme: dark light;
-      -webkit-font-smoothing: antialiased;
-      overscroll-behavior: none;
-      height: 100dvh;
-    }
-
-    /* ─── Background — literal hex, not a var() — prevents single-frame white flash ── */
-    body {
-      background-color: #0d0d0f;
-      color: var(--text-dark);
-      min-height: 100dvh;
-      font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
-      font-size: var(--space-md);
-      line-height: 1.5;
-      padding-top: max(var(--space-md), env(safe-area-inset-top));
-      padding-bottom: max(var(--space-md), env(safe-area-inset-bottom));
-      padding-left: max(var(--space-md), env(safe-area-inset-left));
-      padding-right: max(var(--space-md), env(safe-area-inset-right));
-    }
-
-    @media (prefers-color-scheme: light) {
-      body {
-        background-color: var(--bg-light);
-        color: var(--text-light);
-      }
-    }
-
-    /* ─── Tap behaviour ─────────────────────────────────────────────── */
-    a,
-    button,
-    [role="button"] {
-      -webkit-tap-highlight-color: transparent;
-      touch-action: manipulation;
-    }
-
-    /* ─── Loading screen (visible during Pyodide boot) ──────────────── */
-    #loading {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      min-height: 80dvh;
-      gap: var(--space-xl);
-      transition: opacity var(--fade-duration) ease-out;
-    }
-
-    #loading.hidden {
-      opacity: 0;
-      pointer-events: none;
-    }
-
-    #loading img {
-      width: 80px;
-      height: 80px;
-      animation: pulse 2s ease-in-out infinite;
-    }
-
-    #loading-status {
-      font-size: 14px;
-      font-weight: 500;
-      color: var(--text-muted-dark);
-      letter-spacing: 0.5px;
-    }
-
-    @media (prefers-color-scheme: light) {
-      #loading-status {
-        color: var(--text-muted-light);
-      }
-    }
-
-    @keyframes pulse {
-
-      0%,
-      100% {
-        opacity: 1;
-        transform: scale(1);
-      }
-
-      50% {
-        opacity: 0.6;
-        transform: scale(0.96);
-      }
-    }
-
-    /* ─── Main app (hidden until Pyodide ready) ─────────────────────── */
-    #app {
-      display: none;
-    }
-
-    #app.visible {
-      display: block;
-    }
-
-    /* ─── Header ─────────────────────────────────────────────────────── */
-    .header {
-      display: flex;
-      align-items: center;
-      gap: var(--space-sm);
-      margin-bottom: var(--space-lg);
-      padding-bottom: var(--space-md);
-      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-    }
-
-    @media (prefers-color-scheme: light) {
-      .header {
-        border-bottom-color: rgba(0, 0, 0, 0.08);
-      }
-    }
-
-    .header img {
-      height: 32px;
-      width: auto;
-    }
-
-    .header h1 {
-      font-size: 20px;
-      font-weight: 700;
-      line-height: 1.2;
-      letter-spacing: -0.3px;
-      color: var(--keri-green);
-    }
-
-    /* ─── Status badge ───────────────────────────────────────────────── */
-    .status-row {
-      display: flex;
-      align-items: center;
-      gap: var(--space-xs);
-      margin-bottom: var(--space-sm);
-    }
-
-    .status-dot {
-      width: var(--space-xs);
-      height: var(--space-xs);
-      border-radius: 50%;
-      background-color: var(--status-pending);
-      flex-shrink: 0;
-    }
-
-    .status-dot.done {
-      background-color: var(--status-done);
-    }
-
-    .status-dot.error {
-      background-color: var(--status-error);
-    }
-
-    #status {
-      font-size: 13px;
-      font-weight: 500;
-      color: var(--text-muted-dark);
-    }
-
-    @media (prefers-color-scheme: light) {
-      #status {
-        color: var(--text-muted-light);
-      }
-    }
-
-    /* ─── Output pane ────────────────────────────────────────────────── */
-    #output {
-      margin-top: var(--space-sm);
-      padding: var(--space-sm);
-      background-color: rgba(255, 255, 255, 0.05);
-      border-radius: 10px;
-      border: 1px solid rgba(255, 255, 255, 0.06);
-      font-family: ui-monospace, 'SF Mono', 'Fira Code', monospace;
-      font-size: 12px;
-      line-height: 1.6;
-      white-space: pre-wrap;
-      word-break: break-word;
-      overflow-y: auto;
-      max-height: 30vh;
-      -webkit-overflow-scrolling: touch;
-      contain: layout paint;
-    }
-
-    @media (prefers-color-scheme: light) {
-      #output {
-        background-color: rgba(0, 0, 0, 0.03);
-        border-color: rgba(0, 0, 0, 0.06);
-      }
-    }
-
-    /* ─── Profile form (IndexedDB persistence demo) ──────────────────── */
-    .profile-section {
-      margin-top: var(--space-lg);
-      padding-top: var(--space-md);
-      border-top: 1px solid rgba(255, 255, 255, 0.08);
-    }
-
-    @media (prefers-color-scheme: light) {
-      .profile-section {
-        border-top-color: rgba(0, 0, 0, 0.08);
-      }
-    }
-
-    .field-group {
-      margin-bottom: var(--space-sm);
-    }
-
-    .field-group label {
-      display: block;
-      font-size: 11px;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.8px;
-      color: var(--text-muted-dark);
-      margin-bottom: 4px;
-    }
-
-    @media (prefers-color-scheme: light) {
-      .field-group label {
-        color: var(--text-muted-light);
-      }
-    }
-
-    .field-group input,
-    .field-group textarea {
-      width: 100%;
-      padding: var(--space-xs) var(--space-sm);
-      border-radius: 8px;
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      background-color: rgba(255, 255, 255, 0.06);
-      color: var(--text-dark);
-      font-family: inherit;
-      font-size: 15px;
-      outline: none;
-      transition: border-color 0.2s;
-    }
-
-    .field-group input:focus,
-    .field-group textarea:focus {
-      border-color: var(--keri-gold);
-    }
-
-    @media (prefers-color-scheme: light) {
-
-      .field-group input,
-      .field-group textarea {
-        border-color: rgba(0, 0, 0, 0.12);
-        background-color: rgba(0, 0, 0, 0.03);
-        color: var(--text-light);
-      }
-    }
-
-    .field-group textarea {
-      resize: vertical;
-      min-height: 60px;
-    }
-
-    .btn-row {
-      display: flex;
-      gap: var(--space-sm);
-      align-items: center;
-      margin-top: var(--space-md);
-    }
-
-    .btn {
-      padding: var(--space-xs) var(--space-lg);
-      border-radius: 8px;
-      border: 1px solid rgba(255, 255, 255, 0.15);
-      background-color: rgba(255, 255, 255, 0.08);
-      color: var(--text-dark);
-      font-size: 14px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: background-color 0.15s;
-    }
-
-    .btn:active {
-      background-color: rgba(255, 255, 255, 0.15);
-    }
-
-    @media (prefers-color-scheme: light) {
-      .btn {
-        border-color: rgba(0, 0, 0, 0.15);
-        background-color: rgba(0, 0, 0, 0.04);
-        color: var(--text-light);
-      }
-
-      .btn:active {
-        background-color: rgba(0, 0, 0, 0.08);
-      }
-    }
-
-    #db-status {
-      font-size: 13px;
-      color: var(--text-muted-dark);
-    }
-
-    @media (prefers-color-scheme: light) {
-      #db-status {
-        color: var(--text-muted-light);
-      }
-    }
-
-    /* ─── Identifiers section ───────────────────────────────────────── */
-    .identifiers-section {
-      margin-top: var(--space-lg);
-      padding-top: var(--space-md);
-      border-top: 1px solid rgba(255, 255, 255, 0.08);
-    }
-
-    @media (prefers-color-scheme: light) {
-      .identifiers-section {
-        border-top-color: rgba(0, 0, 0, 0.08);
-      }
-    }
-
-    .section-title {
-      font-size: 13px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.8px;
-      color: var(--text-muted-dark);
-      margin-bottom: var(--space-sm);
-    }
-
-    @media (prefers-color-scheme: light) {
-      .section-title {
-        color: var(--text-muted-light);
-      }
-    }
-
-    .id-list {
-      list-style: none;
-      padding: 0;
-      margin: var(--space-sm) 0 0;
-    }
-
-    .id-list li {
-      padding: var(--space-sm);
-      margin-bottom: var(--space-xs);
-      border-radius: 8px;
-      background-color: rgba(255, 255, 255, 0.05);
-      border: 1px solid rgba(255, 255, 255, 0.06);
-    }
-
-    @media (prefers-color-scheme: light) {
-      .id-list li {
-        background-color: rgba(0, 0, 0, 0.03);
-        border-color: rgba(0, 0, 0, 0.06);
-      }
-    }
-
-    .id-alias {
-      font-weight: 600;
-      font-size: 15px;
-      color: var(--text-dark);
-    }
-
-    @media (prefers-color-scheme: light) {
-      .id-alias {
-        color: var(--text-light);
-      }
-    }
-
-    .id-prefix {
-      font-family: ui-monospace, 'SF Mono', 'Fira Code', monospace;
-      font-size: 11px;
-      color: var(--text-muted-dark);
-      word-break: break-all;
-      margin-top: 2px;
-    }
-
-    @media (prefers-color-scheme: light) {
-      .id-prefix {
-        color: var(--text-muted-light);
-      }
-    }
-
-    .id-state {
-      font-size: 11px;
-      color: var(--text-muted-dark);
-      margin-top: 2px;
-    }
-
-    @media (prefers-color-scheme: light) {
-      .id-state {
-        color: var(--text-muted-light);
-      }
-    }
-
-    #id-status {
-      font-size: 13px;
-      color: var(--text-muted-dark);
-    }
-
-    @media (prefers-color-scheme: light) {
-      #id-status {
-        color: var(--text-muted-light);
-      }
-    }
-
-    /* ─── Record JSON display ────────────────────────────────────────── */
-    #record-json {
-      margin-top: var(--space-sm);
-      padding: var(--space-sm);
-      background-color: rgba(255, 255, 255, 0.05);
-      border-radius: 10px;
-      border: 1px solid rgba(255, 255, 255, 0.06);
-      font-family: ui-monospace, 'SF Mono', 'Fira Code', monospace;
-      font-size: 12px;
-      line-height: 1.6;
-      white-space: pre-wrap;
-      word-break: break-word;
-      min-height: 80px;
-      color: var(--text-muted-dark);
-    }
-
-    @media (prefers-color-scheme: light) {
-      #record-json {
-        background-color: rgba(0, 0, 0, 0.03);
-        border-color: rgba(0, 0, 0, 0.06);
-        color: var(--text-muted-light);
-      }
-    }
-  </style>
-  <script type="module" src="/src/main.ts"></script>
+  <script>/* Theme class — runs before first paint to avoid flash */
+  (function(){var t=localStorage.getItem('keri-appearance')||'system';
+  var l=t==='light'||(t==='system'&&matchMedia('(prefers-color-scheme: light)').matches);
+  document.documentElement.className=l?'theme-light':'theme-dark'})()</script>
+  <script type="module" src="/src/app/main.ts"></script>
 </head>
 
 <body>
-  <!-- Loading screen: SymbolLogo with pulse animation -->
+  <!-- Loading screen (shown during Pyodide boot) -->
   <div id="loading">
     <img src="./SymbolLogo.svg" alt="KERI" />
-    <span id="loading-status">Initializing…</span>
+    <span id="loading-status">Initializing...</span>
   </div>
 
-  <!-- Main app: revealed after Pyodide boots -->
+  <!-- App shell: header → scrollable content → bottom tab bar -->
   <div id="app">
-    <div class="header">
-      <img src="./FullLogo.svg" alt="KERI Foundation" />
-    </div>
-    <div class="status-row">
-      <span class="status-dot" id="status-dot"></span>
-      <span id="status">booting</span>
-    </div>
-    <pre id="output"></pre>
+    <!-- ── Compact top header ────────────────────────────────────────── -->
+    <header class="topbar">
+      <div class="brand-compact">
+        <img src="./SymbolLogo.svg" alt="KERI" />
+        <span>KERI Wallet</span>
+      </div>
+      <div class="header-trailing">
+        <div class="status-row">
+          <span class="status-dot" id="status-dot"></span>
+          <span id="status">booting</span>
+        </div>
+      </div>
+    </header>
 
-    <!-- Profile persistence demo (IndexedDB via Pyodide worker) -->
-    <div class="profile-section">
-      <div class="field-group">
-        <label for="profile-id">Profile ID</label>
-        <input type="text" id="profile-id" placeholder="e.g. jay-1" autocomplete="off" autocorrect="off" />
-      </div>
-      <div class="field-group">
-        <label for="profile-name">Name</label>
-        <input type="text" id="profile-name" placeholder="Display name" autocomplete="off" autocorrect="off" />
-      </div>
-      <div class="field-group">
-        <label for="profile-note">Note</label>
-        <textarea id="profile-note" placeholder="Optional note..." rows="3"></textarea>
-      </div>
-      <div class="btn-row">
-        <button class="btn" id="btn-save">Save</button>
-        <button class="btn" id="btn-load">Load</button>
-        <span id="db-status"></span>
-      </div>
-      <pre id="record-json">No record loaded.</pre>
-    </div>
+    <!-- ── Scrollable content area ───────────────────────────────────── -->
+    <main class="workspace">
+      <div class="workspace-inner">
+        <!-- HOME TAB -->
+        <section id="home-screen" class="screen active">
+          <div class="status-card">
+            <span class="section-kicker">Active Vault</span>
+            <h2 class="vault-name-display">local-demo</h2>
+            <p>Pyodide-backed identifier state with IndexedDB persistence. Manage identifiers, credentials, and multisig groups.</p>
+            <div class="btn-row">
+              <button class="btn btn-primary" id="btn-open-vault" type="button">Open Vault</button>
+            </div>
+          </div>
+        </section>
 
-    <!-- Identifiers proof slice (store-scoped KV via worker) -->
-    <div class="identifiers-section">
-      <div class="section-title">Local Identifiers</div>
-      <div class="btn-row">
-        <button class="btn" id="btn-seed">Seed Test Data</button>
-        <button class="btn" id="btn-list-ids">List Identifiers</button>
-        <span id="id-status"></span>
+        <!-- VAULT TAB -->
+        <section id="vault-screen" class="screen">
+          <div class="vault-header">
+            <div class="vault-header-left">
+              <span class="section-kicker">Vault</span>
+              <h1>local-demo</h1>
+            </div>
+            <!-- Lock action in trailing position -->
+            <button class="btn-ghost" id="btn-lock-vault" type="button" title="Lock wallet"></button>
+          </div>
+
+          <!-- Horizontal scrollable pill bar -->
+          <nav class="vault-pills" aria-label="Vault sections">
+            <button type="button" class="vault-pill active" data-vault-nav="identifiers">Identifiers</button>
+            <button type="button" class="vault-pill" data-vault-nav="remotes">Remotes</button>
+            <button type="button" class="vault-pill" data-vault-nav="groups">Groups</button>
+            <button type="button" class="vault-pill" data-vault-nav="credentials">Credentials</button>
+            <button type="button" class="vault-pill" data-vault-nav="notifications">Alerts</button>
+          </nav>
+
+          <section class="vault-content">
+            <!-- Identifiers -->
+            <article class="vault-page active" data-vault-page="identifiers">
+              <div class="page-header">
+                <h2>Identifiers</h2>
+                <p>Live Locksmith-derived identifier state backed by store-scoped IndexedDB.</p>
+              </div>
+              <div class="identifiers-panel">
+                <div class="section-title">Local identifiers</div>
+                <div class="btn-row">
+                  <button class="btn btn-primary" id="btn-seed" type="button">Seed Test Data</button>
+                  <button class="btn" id="btn-list-ids" type="button">List Identifiers</button>
+                  <span id="id-status"></span>
+                </div>
+                <ul class="id-list" id="id-list"></ul>
+              </div>
+            </article>
+
+            <!-- Remotes -->
+            <article class="vault-page" data-vault-page="remotes">
+              <div class="page-header">
+                <h2>Remotes</h2>
+                <p>Remote identifiers and provider connections. UI-only until the Pyodide runtime port is complete.</p>
+              </div>
+              <div class="card"><strong>Provider connections</strong><p>Portable config and OOBI resolution will land here once the non-Qt Locksmith core is extracted.</p></div>
+              <div class="card"><strong>Remote delegation</strong><p>The desktop flow depends on vault-backed habery state that is not yet available in the worker.</p></div>
+            </article>
+
+            <!-- Groups -->
+            <article class="vault-page" data-vault-page="groups">
+              <div class="page-header">
+                <h2>Groups</h2>
+                <p>Multisig flows from Locksmith. Reserves vault-space for mobile group operations.</p>
+              </div>
+              <div class="card"><strong>Group inception</strong><p>Requires a portable replacement for the Locksmith doer graph.</p></div>
+              <div class="card"><strong>Participant tracking</strong><p>Will follow after portable mailbox and witness integration is defined.</p></div>
+            </article>
+
+            <!-- Credentials -->
+            <article class="vault-page" data-vault-page="credentials">
+              <div class="page-header">
+                <h2>Credentials</h2>
+                <p>Issued, received, and schema views. Available once the credentialing runtime is lifted under Pyodide.</p>
+              </div>
+              <div class="card"><strong>Issued</strong><p>Desktop Registrar and Credentialer flows are not portable as-is.</p></div>
+              <div class="card"><strong>Received</strong><p>Needs verifier and notification plumbing in the worker.</p></div>
+              <div class="card"><strong>Schema</strong><p>Will become navigable once credential pages are backed by real vault data.</p></div>
+            </article>
+
+            <!-- Notifications -->
+            <article class="vault-page" data-vault-page="notifications">
+              <div class="page-header">
+                <h2>Notifications</h2>
+                <p>Event-driven notifications. Needs a bridge-safe event model before becoming active.</p>
+              </div>
+              <div class="card"><strong>Doer events</strong><p>Current Fort-ios worker only emits logs and command results.</p></div>
+              <div class="card"><strong>Toast UX</strong><p>Should be rebuilt natively for the web shell rather than copied from Qt widgets.</p></div>
+            </article>
+          </section>
+        </section>
+
+        <!-- SETTINGS TAB -->
+        <section id="settings-screen" class="screen">
+          <div class="page-header">
+            <h2>Settings</h2>
+            <p>Wallet configuration, environment, and runtime diagnostics.</p>
+          </div>
+
+          <div class="settings-group">
+            <div class="settings-group-title">General</div>
+            <div class="settings-list">
+              <button class="settings-item" id="btn-lock-wallet" type="button">
+                <span>Lock Wallet</span>
+                <span class="chevron">›</span>
+              </button>
+              <div class="settings-item">
+                <span>Appearance</span>
+                <select class="settings-select" id="select-appearance">
+                  <option value="system" selected>System</option>
+                  <option value="light">Light</option>
+                  <option value="dark">Dark</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-group">
+            <div class="settings-group-title">Vault</div>
+            <div class="settings-list">
+              <div class="settings-item">
+                <span>Active Vault</span>
+                <span class="settings-value">local-demo</span>
+              </div>
+              <div class="settings-item">
+                <span>Storage</span>
+                <span class="settings-value">IndexedDB</span>
+              </div>
+              <button class="settings-item destructive" id="btn-clear-vault" type="button">
+                <span>Clear Vault Data</span>
+                <span class="chevron">›</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="settings-group">
+            <div class="settings-group-title">Runtime</div>
+            <div class="settings-list">
+              <div class="settings-item">
+                <span>Engine</span>
+                <span class="settings-value">Pyodide</span>
+              </div>
+              <div class="settings-item">
+                <span>Crypto</span>
+                <span class="settings-value">PyChloride + BLAKE3</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-group">
+            <div class="settings-group-title">About</div>
+            <div class="settings-list">
+              <div class="settings-item">
+                <span>Version</span>
+                <span class="settings-value">0.1.0-dev</span>
+              </div>
+              <div class="settings-item">
+                <span>Build</span>
+                <span class="settings-value" id="settings-build-id">—</span>
+              </div>
+            </div>
+          </div>
+
+          <details class="diagnostics" id="diagnostics-panel" style="margin-top: var(--space-lg);">
+            <summary>Worker diagnostics</summary>
+            <pre id="output"></pre>
+          </details>
+        </section>
       </div>
-      <ul class="id-list" id="id-list"></ul>
-    </div>
+    </main>
+
+    <!-- ── Bottom tab bar (HIG: iOS tab bar) — icons injected by router.ts ── -->
+    <nav class="tab-bar" role="tablist" aria-label="Main navigation">
+      <button class="tab-bar-item active" id="tab-home" type="button" role="tab" aria-selected="true"></button>
+      <button class="tab-bar-item" id="tab-vault" type="button" role="tab" aria-selected="false"></button>
+      <button class="tab-bar-item" id="tab-settings" type="button" role="tab" aria-selected="false"></button>
+    </nav>
   </div>
 </body>
 
