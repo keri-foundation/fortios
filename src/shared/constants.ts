@@ -42,3 +42,6 @@ export const IDB_DEFAULT_STORE = 'main';
 // ── Demo / Proof ─────────────────────────────────────────────────────────────
 /** Challenge string used in the boot-time proof-of-concept crypto cycle. */
 export const PROOF_CHALLENGE = 'keriwasm proof vector v1';
+
+/** Fixed password string for the first bounded Locksmith host proof. */
+export const LOCKSMITH_PROOF_PASSWORD = 'fort-ios locksmith proof 2026';

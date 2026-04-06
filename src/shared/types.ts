@@ -4,8 +4,9 @@
 // eliminating the previous copy-paste duplication.
 //
 // Message protocol (all carry `id: string` for correlation):
-//   IN  → Worker: init, blake3_hash, sign, verify
-//   OUT ← Worker: ready, blake3_result, sign_result, verify_result, error, log
+//   IN  → Worker: init, blake3_hash, sign, verify, locksmith_stretch_password
+//   OUT ← Worker: ready, blake3_result, sign_result, verify_result,
+//                  locksmith_stretch_password_result, error, log
 //   Bridge → Swift: js_error, unhandled_rejection, log, lifecycle, crypto_result
 
 // ── Worker inbound (main → worker) ───────────────────────────────────────────
@@ -14,6 +15,7 @@ export type WorkerInbound =
     | { id: string; type: 'blake3_hash'; data: string }
     | { id: string; type: 'sign'; message: string }
     | { id: string; type: 'verify'; message: string; signature: string; publicKey: string }
+    | { id: string; type: 'locksmith_stretch_password'; password: string }
     | { id: string; type: 'db_put'; store: string; key: string; value: string }
     | { id: string; type: 'db_get'; store: string; key: string }
     | { id: string; type: 'db_del'; store: string; key: string }
@@ -26,6 +28,7 @@ export type WorkerOutbound =
     | { id: string; type: 'blake3_result'; hex: string }
     | { id: string; type: 'sign_result'; signature: string; publicKey: string }
     | { id: string; type: 'verify_result'; valid: boolean }
+    | { id: string; type: 'locksmith_stretch_password_result'; passcode: string }
     | { id: string; type: 'db_put_result'; ok: boolean }
     | { id: string; type: 'db_get_result'; value: string | null }
     | { id: string; type: 'db_del_result'; ok: boolean }
