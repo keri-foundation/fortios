@@ -6,7 +6,7 @@ import {
     BLAKE3_WHEEL,
     PYCHLORIDE_WHEEL,
     PROOF_CHALLENGE,
-} from '../constants';
+} from './constants';
 import {
     BRIDGE_HANDLER_NAME,
     BRIDGE_MESSAGE_TYPES,
@@ -21,7 +21,7 @@ import {
     WORKER_RES_ERROR,
     WORKER_COMMAND_TYPES,
     WORKER_RESULT_TYPES,
-} from '../bridge-contract';
+} from './bridge-contract';
 
 describe('constants', () => {
     it('WORKER_ID_PREFIX is the single character w', () => {

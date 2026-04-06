@@ -18,7 +18,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '..');
 
 const contractPath = resolve(ROOT, 'bridge-contract.json');
-const tsOutPath = resolve(ROOT, 'src', 'bridge-contract.ts');
+const tsOutPath = resolve(ROOT, 'src', 'shared', 'bridge-contract.ts');
 const swiftOutPath = resolve(ROOT, 'xcodeproj', 'KeriWallet', 'KeriWallet', 'BridgeContract.swift');
 const kotlinOutPath = resolve(ROOT, 'generated', 'BridgeContract.kt');
 
