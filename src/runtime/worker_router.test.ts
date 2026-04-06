@@ -1,16 +1,17 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { PyodideInterface } from '../types';
-import type { KVFactory, WorkerKV } from '../worker_router';
+import type { PyodideInterface } from '../shared/types';
+import type { KVFactory, WorkerKV } from './worker_router';
 import {
     handleBlake3Hash,
     handleDbDel,
     handleDbGet,
     handleDbList,
     handleDbPut,
+    handleLocksmithStretchPassword,
     handleSign,
     handleVerify,
     routeMessage,
-} from '../worker_router';
+} from './worker_router';
 
 // ── Mock PyodideInterface factory ────────────────────────────────────────────
 
@@ -146,6 +147,28 @@ describe('handleVerify', () => {
     });
 });
 
+// ── handleLocksmithStretchPassword ──────────────────────────────────────────
+
+describe('handleLocksmithStretchPassword', () => {
+    it('returns locksmith_stretch_password_result with passcode', async () => {
+        const pyodide = makeMockPyodide(() => Promise.resolve('abcdefghijklmnopqrstuv'));
+
+        const result = await handleLocksmithStretchPassword('req-lock-1', 'password', pyodide);
+
+        expect(result.type).toBe('locksmith_stretch_password_result');
+        expect(result).toHaveProperty('passcode', 'abcdefghijklmnopqrstuv');
+    });
+
+    it('passes the password as a JSON-encoded Python string', async () => {
+        const pyodide = makeMockPyodide(() => Promise.resolve('passcode'));
+
+        await handleLocksmithStretchPassword('req-lock-2', 'test "password"', pyodide);
+
+        const calledCode = (pyodide.runPythonAsync as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+        expect(calledCode).toContain('test \\"password\\"');
+    });
+});
+
 // ── routeMessage ─────────────────────────────────────────────────────────────
 
 describe('routeMessage', () => {
@@ -199,6 +222,17 @@ describe('routeMessage', () => {
         );
         expect(result.type).toBe('verify_result');
         expect(result).toHaveProperty('valid', true);
+    });
+
+    it('routes locksmith_stretch_password → handleLocksmithStretchPassword', async () => {
+        const pyodide = makeMockPyodide(() => Promise.resolve('stretch-result'));
+        const result = await routeMessage(
+            { id: 'r3a', type: 'locksmith_stretch_password', password: 'pw' },
+            pyodide,
+            true,
+        );
+        expect(result.type).toBe('locksmith_stretch_password_result');
+        expect(result).toHaveProperty('passcode', 'stretch-result');
     });
 
     it('routes db_put → handleDbPut', async () => {

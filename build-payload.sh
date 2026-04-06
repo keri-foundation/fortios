@@ -86,6 +86,8 @@ echo "[build-payload] pyodide bundle ok ($(du -sh "${PAYLOAD_DIR}/dist/pyodide" 
 # Python files.  We cherry-pick only the files needed at runtime.
 KERIWASM_PYTHON_DIR="${SCRIPT_DIR}/../keriwasm/python"
 PYTHON_FILES=(indexeddb_python.py pysodium.py lmdb.py)
+LOCKSMITH_PYTHON_DIR="${SCRIPT_DIR}/../locksmith/src/locksmith"
+LOCKSMITH_FILES=(__init__.py core/crypto.py)
 
 if [[ ! -d "${KERIWASM_PYTHON_DIR}" ]]; then
   echo "error: keriwasm/python/ not found at ${KERIWASM_PYTHON_DIR}" 1>&2
@@ -102,6 +104,42 @@ for pyfile in "${PYTHON_FILES[@]}"; do
   fi
   cp "${src}" "${PAYLOAD_DIST_DIR}/python/${pyfile}"
 done
+
+if [[ ! -d "${LOCKSMITH_PYTHON_DIR}" ]]; then
+  echo "error: locksmith/src/locksmith not found at ${LOCKSMITH_PYTHON_DIR}" 1>&2
+  echo "       Ensure libs/locksmith is checked out alongside Fort-ios" 1>&2
+  exit 1
+fi
+
+mkdir -p "${PAYLOAD_DIST_DIR}/python/locksmith"
+for pyfile in "${LOCKSMITH_FILES[@]}"; do
+  src="${LOCKSMITH_PYTHON_DIR}/${pyfile}"
+  dest="${PAYLOAD_DIST_DIR}/python/locksmith/${pyfile}"
+  if [[ ! -f "${src}" ]]; then
+    echo "error: required Locksmith Python file not found: ${src}" 1>&2
+    exit 1
+  fi
+  mkdir -p "$(dirname "${dest}")"
+  cp "${src}" "${dest}"
+done
+
+LOCKSMITH_MANIFEST="${PAYLOAD_DIST_DIR}/python/locksmith-manifest.json"
+python3 - "${PAYLOAD_DIST_DIR}/python/locksmith" "${LOCKSMITH_MANIFEST}" <<'PY'
+import json, os, sys
+
+package_dir, out_path = sys.argv[1], sys.argv[2]
+files = sorted(
+    os.path.relpath(os.path.join(root, f), package_dir)
+    for root, _, filenames in os.walk(package_dir)
+    for f in filenames
+    if f.endswith(".py")
+)
+dirs = sorted({os.path.dirname(f) for f in files if os.path.dirname(f)})
+with open(out_path, "w", encoding="utf-8") as fp:
+    json.dump({"dirs": dirs, "files": files}, fp, indent=2)
+PY
+LOCKSMITH_COUNT=$(find "${PAYLOAD_DIST_DIR}/python/locksmith" -name '*.py' | wc -l | tr -d ' ')
+echo "[build-payload] locksmith subset → dist/python/locksmith/ (${LOCKSMITH_COUNT} files)"
 
 # Bundle hio subset (required for keripy imports: doing, decking, ogling, etc.)
 HIO_SRC_DIR="${KERIWASM_PYTHON_DIR}/hio"
