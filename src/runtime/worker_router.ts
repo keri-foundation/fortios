@@ -15,7 +15,7 @@
 //
 
 import type { KVFactory } from './kv';
-import type { PyodideInterface, WorkerInbound, WorkerOutbound } from './types';
+import type { PyodideInterface, WorkerInbound, WorkerOutbound } from '../shared/types';
 
 // Re-export KVFactory so existing consumers that import from worker_router still work.
 export { openIdbKVFactory } from './kv';
@@ -73,6 +73,17 @@ _vresult
     const valid: boolean = result?.toJs ? Boolean(result.toJs()) : Boolean(result);
     if (result?.destroy) result.destroy();
     return { id, type: 'verify_result', valid };
+}
+
+export async function handleLocksmithStretchPassword(
+    id: string,
+    password: string,
+    pyodide: PyodideInterface,
+): Promise<WorkerOutbound> {
+    const passcode: string = await pyodide.runPythonAsync(
+        `_locksmith_crypto.stretch_password_to_passcode(${JSON.stringify(password)})`,
+    );
+    return { id, type: 'locksmith_stretch_password_result', passcode };
 }
 
 // ── IndexedDB handlers (pure JS — no Pyodide) ───────────────────────────────
@@ -155,6 +166,8 @@ export async function routeMessage(
             return handleSign(cmd.id, cmd.message, pyodide);
         case 'verify':
             return handleVerify(cmd.id, cmd.message, cmd.signature, cmd.publicKey, pyodide);
+        case 'locksmith_stretch_password':
+            return handleLocksmithStretchPassword(cmd.id, cmd.password, pyodide);
         case 'db_put':
             return handleDbPut(cmd.id, cmd.store, cmd.key, cmd.value, kvFactory);
         case 'db_get':
