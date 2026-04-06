@@ -7,9 +7,9 @@
 // manipulation and demo-specific logic — those belong in main.ts.
 
 import { createBridgeAdapter } from './bridge_adapter';
-import { WORKER_ID_PREFIX } from './constants';
+import { WORKER_ID_PREFIX } from '../shared/constants';
 import PyodideWorker from './pyodide_worker?worker';
-import type { BridgeAdapter, BridgeEnvelope, NativeCommand, WorkerInbound, WorkerOutbound } from './types';
+import type { BridgeAdapter, BridgeEnvelope, NativeCommand, WorkerInbound, WorkerOutbound } from '../shared/types';
 
 // ── Bridge adapter (platform-agnostic) ────────────────────────────────────────
 const bridge: BridgeAdapter = createBridgeAdapter();

@@ -22,7 +22,7 @@
 //   reopens the database, and retries once.
 //   See: WebKit bugs #197050, #273827.
 
-import { IDB_DATABASE_NAME, IDB_DEFAULT_STORE } from './constants';
+import { IDB_DATABASE_NAME, IDB_DEFAULT_STORE } from '../shared/constants';
 
 /** Minimal async key-value interface — implemented by IdbKV, mockable in tests. */
 export interface WorkerKV {

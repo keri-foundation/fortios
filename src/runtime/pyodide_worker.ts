@@ -7,8 +7,8 @@
 // Type definitions and constants are imported from shared modules (types.ts, constants.ts)
 // and bundled by Vite at build time — the worker runtime uses importScripts only for Pyodide.
 
-import { BLAKE3_WHEEL, PYCHLORIDE_WHEEL, WORKER_LOG_ID } from './constants';
-import type { PyodideInterface, WorkerInbound, WorkerOutbound } from './types';
+import { BLAKE3_WHEEL, PYCHLORIDE_WHEEL, WORKER_LOG_ID } from '../shared/constants';
+import type { PyodideInterface, WorkerInbound, WorkerOutbound } from '../shared/types';
 import type { KVFactory } from './worker_router';
 import { openIdbKVFactory, routeMessage } from './worker_router';
 
@@ -52,6 +52,25 @@ async function installPythonFile(url: string, destPath: string): Promise<void> {
     (pyodide as any).FS.writeFile(destPath, text);
 }
 
+async function installPythonTree(manifestUrl: string, sourceBaseUrl: string, targetRoot: string): Promise<number> {
+    const manifestResp = await fetch(manifestUrl);
+    if (!manifestResp.ok) throw new Error(`python manifest fetch failed: ${manifestUrl} (${manifestResp.status})`);
+    const manifest: { dirs: string[]; files: string[] } = await manifestResp.json();
+
+    (pyodide as any).FS.mkdirTree(targetRoot);
+    for (const dir of manifest.dirs) {
+        (pyodide as any).FS.mkdirTree(`${targetRoot}/${dir}`);
+    }
+
+    await Promise.all(
+        manifest.files.map((relPath) =>
+            installPythonFile(`${sourceBaseUrl}${relPath}`, `${targetRoot}/${relPath}`),
+        ),
+    );
+
+    return manifest.files.length;
+}
+
 async function boot(origin: string): Promise<void> {
     pyodideBase = `${origin}/pyodide/`;
     wheelBase = `${origin}/pyodide/wheels/`;
@@ -92,23 +111,21 @@ async function boot(origin: string): Promise<void> {
     workerLog('installing hio subset');
     const hioBase = `${pythonBase}hio/`;
     const hioRoot = '/home/pyodide/hio';
+    const hioCount = await installPythonTree(`${pythonBase}hio-manifest.json`, hioBase, hioRoot);
+    workerLog(`hio subset installed (${hioCount} files)`);
 
-    const manifestResp = await fetch(`${pythonBase}hio-manifest.json`);
-    if (!manifestResp.ok) throw new Error(`hio-manifest.json fetch failed (${manifestResp.status})`);
-    const manifest: { dirs: string[]; files: string[] } = await manifestResp.json();
+    // Install the first bounded Locksmith subset from the real Locksmith repo.
+    workerLog('installing locksmith subset');
+    const locksmithBase = `${pythonBase}locksmith/`;
+    const locksmithRoot = '/home/pyodide/locksmith';
+    const locksmithCount = await installPythonTree(`${pythonBase}locksmith-manifest.json`, locksmithBase, locksmithRoot);
+    workerLog(`locksmith subset installed (${locksmithCount} files)`);
 
-    // Create directory tree first (manifest dirs are relative to hio/).
-    (pyodide as any).FS.mkdirTree(hioRoot);
-    for (const dir of manifest.dirs) {
-        (pyodide as any).FS.mkdirTree(`${hioRoot}/${dir}`);
-    }
-
-    await Promise.all(
-        manifest.files.map((relPath) =>
-            installPythonFile(`${hioBase}${relPath}`, `${hioRoot}/${relPath}`),
-        ),
-    );
-    workerLog(`hio subset installed (${manifest.files.length} files)`);
+    await pyodide.runPythonAsync(`
+import sys as _sys
+if '/home/pyodide' not in _sys.path:
+    _sys.path.insert(0, '/home/pyodide')
+`);
 
     // NOTE: micropip is intentionally NOT loaded here.
     // The bundled app runs under `app://` with no network access to PyPI.
@@ -136,6 +153,7 @@ import blake3 as _blake3
 import pychloride as _sodium
 import binascii as _binascii
 import json as _json
+import locksmith.core.crypto as _locksmith_crypto
 `);
 
     // Generate ephemeral Ed25519 session keypair (not persisted across launches).

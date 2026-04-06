@@ -10,8 +10,8 @@
 // This is the ONLY platform-detection code in the web payload. Everything
 // else (worker management, crypto proof, DOM updates) is platform-agnostic.
 
-import { BRIDGE_HANDLER_NAME } from './constants';
-import type { BridgeAdapter, BridgeEnvelope } from './types';
+import { BRIDGE_HANDLER_NAME } from '../shared/constants';
+import type { BridgeAdapter, BridgeEnvelope } from '../shared/types';
 
 // ── Adapter implementations ──────────────────────────────────────────────────
 
