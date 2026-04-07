@@ -6,6 +6,13 @@ import '../styles/vault.css';
 import '../styles/settings.css';
 
 import { LOADING_FADE_MS } from '../shared/constants';
+import {
+    LIFECYCLE_BOOT,
+    LIFECYCLE_CRYPTO_READY,
+    LIFECYCLE_ERROR,
+    LIFECYCLE_PYODIDE_LOADING,
+    LIFECYCLE_READY,
+} from '../shared/bridge-contract';
 import { installIdentifierHandlers } from './identifiers';
 import {
     initPyodide,
@@ -57,10 +64,12 @@ async function main(): Promise<void> {
     installGlobalErrorHooks();
     installNativeCommandHandler();
     onWorkerLog(log);
-    postToBridge({ type: 'lifecycle', timestamp: isoNow(), message: 'boot' });
+    postToBridge({ type: 'lifecycle', timestamp: isoNow(), message: LIFECYCLE_BOOT });
 
     setLoadingStatus('Loading Pyodide…');
+    postToBridge({ type: 'lifecycle', timestamp: isoNow(), message: LIFECYCLE_PYODIDE_LOADING });
     await initPyodide();
+    postToBridge({ type: 'lifecycle', timestamp: isoNow(), message: LIFECYCLE_CRYPTO_READY });
 
     setLoadingStatus('Running crypto proof…');
     showApp();
@@ -71,7 +80,7 @@ async function main(): Promise<void> {
     await runProof(log);
 
     setStatus('Locksmith shell ready', 'done');
-    postToBridge({ type: 'lifecycle', timestamp: isoNow(), message: 'done' });
+    postToBridge({ type: 'lifecycle', timestamp: isoNow(), message: LIFECYCLE_READY });
 
     // Populate build ID from manifest (best-effort, non-blocking)
     fetch('./build-manifest.json')
@@ -89,4 +98,5 @@ main().catch((e: unknown) => {
     setStatus(err, 'error');
     showApp();
     log(err);
+    postToBridge({ type: 'lifecycle', timestamp: isoNow(), message: LIFECYCLE_ERROR });
 });

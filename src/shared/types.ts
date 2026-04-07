@@ -7,11 +7,11 @@
 //   IN  → Worker: init, blake3_hash, sign, verify, locksmith_stretch_password
 //   OUT ← Worker: ready, blake3_result, sign_result, verify_result,
 //                  locksmith_stretch_password_result, error, log
-//   Bridge → Swift: js_error, unhandled_rejection, log, lifecycle, crypto_result
+//   Bridge → Native host: js_error, unhandled_rejection, log, lifecycle, crypto_result
 
 // ── Worker inbound (main → worker) ───────────────────────────────────────────
 export type WorkerInbound =
-    | { id: string; type: 'init'; origin: string }
+    | { id: string; type: 'init'; baseUrl: string }
     | { id: string; type: 'blake3_hash'; data: string }
     | { id: string; type: 'sign'; message: string }
     | { id: string; type: 'verify'; message: string; signature: string; publicKey: string }
@@ -36,7 +36,7 @@ export type WorkerOutbound =
     | { id: string; type: 'error'; error: string }
     | { id: string; type: 'log'; message: string };
 
-// ── Bridge envelope (JS → Swift via webkit.messageHandlers) ──────────────────
+// ── Bridge envelope (JS → native host bridge) ────────────────────────────────
 export type BridgeEnvelope =
     | { type: 'js_error'; timestamp: string; message: string; stack?: string; source?: string; line?: number; col?: number }
     | { type: 'unhandled_rejection'; timestamp: string; message: string; stack?: string }
@@ -57,7 +57,7 @@ export interface PyodideInterface {
  * Abstraction over the native bridge transport.
  *
  * - **iOS:** Uses `window.webkit.messageHandlers` (WKWebView).
- * - **Android:** Uses `window.AndroidBridge.postMessage()` (addJavascriptInterface).
+ * - **Android:** Uses the injected `window.bridge.postMessage()` object from `addWebMessageListener`.
  * - **Test/fallback:** No-op (messages are silently dropped).
  *
  * Injected at boot time via `initBridge()` in main.ts.

@@ -4,7 +4,7 @@
 //
 // Platforms:
 //   iOS (WKWebView)   — window.webkit.messageHandlers.<name>.postMessage()
-//   Android (WebView)  — window.AndroidBridge.postMessage(JSON.stringify())
+//   Android (WebView)  — window.<name>.postMessage(JSON.stringify())
 //   Fallback (browser) — silent no-op (messages dropped)
 //
 // This is the ONLY platform-detection code in the web payload. Everything
@@ -12,6 +12,10 @@
 
 import { BRIDGE_HANDLER_NAME } from '../shared/constants';
 import type { BridgeAdapter, BridgeEnvelope } from '../shared/types';
+
+type AndroidBridgeObject = {
+    postMessage: (json: string) => void;
+};
 
 // ── Adapter implementations ──────────────────────────────────────────────────
 
@@ -28,12 +32,13 @@ function createWebKitAdapter(): BridgeAdapter {
     };
 }
 
-/** Android: `addJavascriptInterface` exposes `window.AndroidBridge`. */
+/** Android: `addWebMessageListener` exposes `window.bridge`. */
 function createAndroidAdapter(): BridgeAdapter {
     return {
         postMessage(payload: BridgeEnvelope): void {
-            const bridge = (window as unknown as { AndroidBridge?: { postMessage: (json: string) => void } })
-                .AndroidBridge;
+            const bridge = (window as unknown as Record<string, unknown>)[BRIDGE_HANDLER_NAME] as
+                | AndroidBridgeObject
+                | undefined;
             if (bridge && typeof bridge.postMessage === 'function') {
                 bridge.postMessage(JSON.stringify(payload));
             }
@@ -55,8 +60,8 @@ export function createBridgeAdapter(): BridgeAdapter {
         if ((window as unknown as { webkit?: unknown }).webkit) {
             return createWebKitAdapter();
         }
-        // Android detection: addJavascriptInterface injects `window.AndroidBridge`
-        if ((window as unknown as { AndroidBridge?: unknown }).AndroidBridge) {
+        // Android detection: addWebMessageListener injects a named object.
+        if (typeof (window as unknown as Record<string, unknown>)[BRIDGE_HANDLER_NAME] !== 'undefined') {
             return createAndroidAdapter();
         }
     }

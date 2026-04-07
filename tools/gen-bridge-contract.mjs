@@ -203,7 +203,7 @@ function generateKotlin() {
         '',
         '    // ── Bridge Handler ──────────────────────────────────────────────────────',
         '',
-        `    /** addJavascriptInterface name — must match JS: \`window.AndroidBridge\`. */`,
+        `    /** Injected bridge object name — must match JS: \`window.${contract.bridge.handlerName}\`. */`,
         `    const val HANDLER_NAME = ${JSON.stringify(contract.bridge.handlerName)}`,
         '',
     ];

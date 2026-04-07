@@ -103,10 +103,10 @@ export async function initPyodide(): Promise<void> {
         entry.resolve(result);
     };
 
-    // Pass window.location.origin so the worker knows the app:// scheme base.
-    // Vite inlines workers as blob: URLs — self.location.origin is 'null' there.
+    // Pass the document URL so the worker can resolve relative bundled assets.
+    // Vite inlines workers as blob: URLs — self.location is not useful there.
     const id = generateId();
-    const result = await sendToWorker({ id, type: 'init', origin: window.location.origin });
+    const result = await sendToWorker({ id, type: 'init', baseUrl: window.location.href });
     if (result.type === 'error') {
         throw new Error(`Pyodide boot failed: ${result.error}`);
     }

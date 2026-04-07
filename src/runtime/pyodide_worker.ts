@@ -16,7 +16,7 @@ import { openIdbKVFactory, routeMessage } from './worker_router';
 declare function loadPyodide(opts: { indexURL: string }): Promise<PyodideInterface>;
 
 // Populated on first 'init' message — not constants because blob workers
-// have no meaningful self.location.origin.
+// have no meaningful document URL.
 let pyodideBase = '';
 let wheelBase = '';
 let pythonBase = '';
@@ -71,10 +71,10 @@ async function installPythonTree(manifestUrl: string, sourceBaseUrl: string, tar
     return manifest.files.length;
 }
 
-async function boot(origin: string): Promise<void> {
-    pyodideBase = `${origin}/pyodide/`;
-    wheelBase = `${origin}/pyodide/wheels/`;
-    pythonBase = `${origin}/python/`;
+async function boot(baseUrl: string): Promise<void> {
+    pyodideBase = new URL('./pyodide/', baseUrl).toString();
+    wheelBase = new URL('./pyodide/wheels/', baseUrl).toString();
+    pythonBase = new URL('./python/', baseUrl).toString();
 
     // importScripts is synchronous — injects loadPyodide() into the worker scope.
     workerLog('loading pyodide.js');
@@ -190,7 +190,7 @@ self.onmessage = async (ev: MessageEvent<WorkerInbound>) => {
     let out: WorkerOutbound;
     try {
         if (cmd.type === 'init') {
-            await boot(cmd.origin);
+            await boot(cmd.baseUrl);
             out = { id: cmd.id, type: 'ready' };
         } else {
             out = await routeMessage(cmd, pyodide, booted, kvFactory);

@@ -68,6 +68,6 @@
   --font-caption: 12px;
 
   /* ── Shell chrome ──────────────────────────────────────────────────── */
-  --header-height: 52px;
-  --tab-bar-height: 49px;
+  --header-height: 56px;
+  --tab-bar-height: 64px;
 }
