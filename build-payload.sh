@@ -170,6 +170,9 @@ else
   echo "warning: hio subset not found at ${HIO_SRC_DIR} — skipping" 1>&2
 fi
 
+find "${PAYLOAD_DIST_DIR}/python" -type d -name '__pycache__' -exec rm -r {} + 2>/dev/null || true
+find "${PAYLOAD_DIST_DIR}/python" -type f -name '*.pyc' -delete
+
 TOTAL_PY=$(find "${PAYLOAD_DIST_DIR}/python" -name '*.py' | wc -l | tr -d ' ')
 echo "[build-payload] keriwasm python shims → dist/python/ (${TOTAL_PY} files total)"
 
