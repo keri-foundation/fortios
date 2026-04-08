@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
     WORKER_ID_PREFIX,
+    WORKER_DIAGNOSTICS_ID,
     WORKER_LOG_ID,
     LOADING_FADE_MS,
     BLAKE3_WHEEL,
@@ -18,9 +19,12 @@ import {
     WORKER_RES_BLAKE3_RESULT,
     WORKER_RES_SIGN_RESULT,
     WORKER_RES_VERIFY_RESULT,
+    WORKER_RES_DIAGNOSTICS,
     WORKER_RES_ERROR,
+    BRIDGE_DIAGNOSTICS,
     WORKER_COMMAND_TYPES,
     WORKER_RESULT_TYPES,
+    BRIDGE_MESSAGE_TYPES,
 } from './bridge-contract';
 
 describe('constants', () => {
@@ -30,6 +34,10 @@ describe('constants', () => {
 
     it('WORKER_LOG_ID is non-empty', () => {
         expect(WORKER_LOG_ID.length).toBeGreaterThan(0);
+    });
+
+    it('WORKER_DIAGNOSTICS_ID is non-empty', () => {
+        expect(WORKER_DIAGNOSTICS_ID.length).toBeGreaterThan(0);
     });
 
     it('LOADING_FADE_MS is a positive number', () => {
@@ -81,11 +89,13 @@ describe('bridge-contract constants', () => {
         expect(WORKER_RESULT_TYPES).toContain(WORKER_RES_BLAKE3_RESULT);
         expect(WORKER_RESULT_TYPES).toContain(WORKER_RES_SIGN_RESULT);
         expect(WORKER_RESULT_TYPES).toContain(WORKER_RES_VERIFY_RESULT);
+        expect(WORKER_RESULT_TYPES).toContain(WORKER_RES_DIAGNOSTICS);
         expect(WORKER_RESULT_TYPES).toContain(WORKER_RES_ERROR);
     });
 
     it('BRIDGE_MESSAGE_TYPES contains all bridge message type constants', () => {
         expect(Array.isArray(BRIDGE_MESSAGE_TYPES)).toBe(true);
         expect(BRIDGE_MESSAGE_TYPES.length).toBeGreaterThan(0);
+        expect(BRIDGE_MESSAGE_TYPES).toContain(BRIDGE_DIAGNOSTICS);
     });
 });

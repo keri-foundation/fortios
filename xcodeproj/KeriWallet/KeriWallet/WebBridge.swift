@@ -5,6 +5,7 @@ enum WebBridgeMessageType: String, Decodable {
     case jsError = "js_error"
     case unhandledRejection = "unhandled_rejection"
     case log
+    case diagnostics
     case lifecycle
     case cryptoResult = "crypto_result"
 }
@@ -24,6 +25,10 @@ struct WebBridgeEnvelope: Decodable {
     let timestamp: String
     let message: String
 
+    let component: String?
+    let level: String?
+    let phase: String?
+    let detail: String?
     let stack: String?
     let source: String?
     let line: Int?
@@ -60,6 +65,22 @@ final class WebBridge: NSObject, WKScriptMessageHandler {
         case .log, .lifecycle:
             AppLogger.info(
                 "[WebBridge] \(envelope.type.rawValue): \(envelope.message)", category: AppConfig.Log.webBridge)
+        case .diagnostics:
+            let component = envelope.component ?? "unknown"
+            let phase = envelope.phase.map { "[\($0)]" } ?? ""
+            let detail = envelope.detail.map { " - \($0)" } ?? ""
+            let line = "[WebBridge] diagnostics [\(component)]\(phase) \(envelope.message)\(detail)"
+
+            switch envelope.level {
+            case "error":
+                AppLogger.error(line, category: AppConfig.Log.webBridge)
+            case "warn":
+                AppLogger.warning(line, category: AppConfig.Log.webBridge)
+            case "debug":
+                AppLogger.debug(line, category: AppConfig.Log.webBridge)
+            default:
+                AppLogger.info(line, category: AppConfig.Log.webBridge)
+            }
         case .cryptoResult:
             if let callback = onCryptoResult {
                 // Re-decode with the narrower CryptoResultPayload type

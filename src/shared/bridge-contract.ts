@@ -27,6 +27,7 @@ export const LIFECYCLE_STATES = [
 export const BRIDGE_JS_ERROR = "js_error" as const;
 export const BRIDGE_UNHANDLED_REJECTION = "unhandled_rejection" as const;
 export const BRIDGE_LOG = "log" as const;
+export const BRIDGE_DIAGNOSTICS = "diagnostics" as const;
 export const BRIDGE_LIFECYCLE = "lifecycle" as const;
 export const BRIDGE_CRYPTO_RESULT = "crypto_result" as const;
 
@@ -34,6 +35,7 @@ export const BRIDGE_MESSAGE_TYPES = [
     BRIDGE_JS_ERROR,
     BRIDGE_UNHANDLED_REJECTION,
     BRIDGE_LOG,
+    BRIDGE_DIAGNOSTICS,
     BRIDGE_LIFECYCLE,
     BRIDGE_CRYPTO_RESULT,
 ] as const;
@@ -72,6 +74,7 @@ export const WORKER_RES_DB_GET_RESULT = "db_get_result" as const;
 export const WORKER_RES_DB_DEL_RESULT = "db_del_result" as const;
 export const WORKER_RES_DB_LIST_RESULT = "db_list_result" as const;
 export const WORKER_RES_ERROR = "error" as const;
+export const WORKER_RES_DIAGNOSTICS = "diagnostics" as const;
 export const WORKER_RES_LOG = "log" as const;
 
 export const WORKER_RESULT_TYPES = [
@@ -85,5 +88,6 @@ export const WORKER_RESULT_TYPES = [
     WORKER_RES_DB_DEL_RESULT,
     WORKER_RES_DB_LIST_RESULT,
     WORKER_RES_ERROR,
+    WORKER_RES_DIAGNOSTICS,
     WORKER_RES_LOG,
 ] as const;

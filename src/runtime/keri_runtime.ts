@@ -9,7 +9,15 @@
 import { createBridgeAdapter } from './bridge_adapter';
 import { WORKER_ID_PREFIX } from '../shared/constants';
 import PyodideWorker from './pyodide_worker?worker';
-import type { BridgeAdapter, BridgeEnvelope, NativeCommand, WorkerInbound, WorkerOutbound } from '../shared/types';
+import type {
+    BridgeAdapter,
+    BridgeEnvelope,
+    DiagnosticsContext,
+    DiagnosticsEvent,
+    NativeCommand,
+    WorkerInbound,
+    WorkerOutbound,
+} from '../shared/types';
 
 // ── Bridge adapter (platform-agnostic) ────────────────────────────────────────
 const bridge: BridgeAdapter = createBridgeAdapter();
@@ -62,11 +70,46 @@ export function generateId(): string {
 /** Callback invoked for every uncorrelated worker log message (type 'log'). */
 export type WorkerLogCallback = (message: string) => void;
 
+export type WorkerDiagnosticsCallback = (event: DiagnosticsEvent) => void;
+
 let _logCallback: WorkerLogCallback | null = null;
+let _diagnosticsCallback: WorkerDiagnosticsCallback | null = null;
 
 /** Register a callback to receive worker log messages. */
 export function onWorkerLog(cb: WorkerLogCallback): void {
     _logCallback = cb;
+}
+
+export function onWorkerDiagnostics(cb: WorkerDiagnosticsCallback): void {
+    _diagnosticsCallback = cb;
+}
+
+function formatDiagnosticsContext(context?: DiagnosticsContext): string {
+    if (!context) {
+        return '';
+    }
+
+    const entries = Object.entries(context);
+    if (entries.length === 0) {
+        return '';
+    }
+
+    return ` (${entries.map(([key, value]) => `${key}=${String(value)}`).join(', ')})`;
+}
+
+function formatDiagnosticsLine(event: DiagnosticsEvent): string {
+    const component = `[${event.component}]`;
+    const level = `[${event.level}]`;
+    const phase = event.phase ? `[${event.phase}]` : '';
+    const detail = event.detail ? ` - ${event.detail}` : '';
+    const context = formatDiagnosticsContext(event.context);
+    return `${component}${level}${phase} ${event.message}${context}${detail}`;
+}
+
+function emitDiagnostics(event: DiagnosticsEvent): void {
+    _diagnosticsCallback?.(event);
+    _logCallback?.(formatDiagnosticsLine(event));
+    postToBridge({ type: 'diagnostics', timestamp: isoNow(), ...event });
 }
 
 export function sendToWorker(cmd: WorkerInbound): Promise<WorkerOutbound> {
@@ -80,7 +123,13 @@ export async function initPyodide(): Promise<void> {
     worker = new PyodideWorker();
 
     worker.onerror = (ev: ErrorEvent) => {
-        _logCallback?.(`[worker error] ${ev.message}`);
+        emitDiagnostics({
+            component: 'runtime',
+            level: 'error',
+            phase: 'worker',
+            message: 'Worker runtime error',
+            detail: ev.message,
+        });
         for (const [id, entry] of pending) {
             pending.delete(id);
             entry.reject(new Error(ev.message));
@@ -89,6 +138,11 @@ export async function initPyodide(): Promise<void> {
 
     worker.onmessage = (ev: MessageEvent<WorkerOutbound>) => {
         const result = ev.data;
+
+        if (result.type === 'diagnostics') {
+            emitDiagnostics(result.event);
+            return;
+        }
 
         // Forward worker log messages to bridge + callback (not correlated to pending ops).
         if (result.type === 'log') {

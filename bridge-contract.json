@@ -16,6 +16,7 @@
         "js_error",
         "unhandled_rejection",
         "log",
+        "diagnostics",
         "lifecycle",
         "crypto_result"
     ],
@@ -41,6 +42,7 @@
         "db_del_result",
         "db_list_result",
         "error",
+        "diagnostics",
         "log"
     ]
 }

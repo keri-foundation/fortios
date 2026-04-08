@@ -14,6 +14,9 @@ export const WORKER_ID_PREFIX = 'w';
 /** Synthetic `id` used for uncorrelated log messages from the worker. */
 export const WORKER_LOG_ID = '_log';
 
+/** Synthetic `id` used for uncorrelated structured diagnostics from the worker. */
+export const WORKER_DIAGNOSTICS_ID = '_diagnostics';
+
 // ── Timing ───────────────────────────────────────────────────────────────────
 /**
  * Milliseconds to wait for the CSS fade-out transition before showing the app.

@@ -44,6 +44,7 @@ object BridgeContract {
     const val BRIDGE_JS_ERROR = "js_error"
     const val BRIDGE_UNHANDLED_REJECTION = "unhandled_rejection"
     const val BRIDGE_LOG = "log"
+    const val BRIDGE_DIAGNOSTICS = "diagnostics"
     const val BRIDGE_LIFECYCLE = "lifecycle"
     const val BRIDGE_CRYPTO_RESULT = "crypto_result"
 
@@ -51,6 +52,7 @@ object BridgeContract {
         BRIDGE_JS_ERROR,
         BRIDGE_UNHANDLED_REJECTION,
         BRIDGE_LOG,
+        BRIDGE_DIAGNOSTICS,
         BRIDGE_LIFECYCLE,
         BRIDGE_CRYPTO_RESULT,
     )
@@ -91,6 +93,7 @@ object BridgeContract {
     const val WORKER_RES_DB_DEL_RESULT = "db_del_result"
     const val WORKER_RES_DB_LIST_RESULT = "db_list_result"
     const val WORKER_RES_ERROR = "error"
+    const val WORKER_RES_DIAGNOSTICS = "diagnostics"
     const val WORKER_RES_LOG = "log"
 
     val ALL_WORKER_RESULT_TYPES = listOf(
@@ -104,6 +107,7 @@ object BridgeContract {
         WORKER_RES_DB_DEL_RESULT,
         WORKER_RES_DB_LIST_RESULT,
         WORKER_RES_ERROR,
+        WORKER_RES_DIAGNOSTICS,
         WORKER_RES_LOG,
     )
 }

@@ -22,6 +22,23 @@ export type WorkerInbound =
     | { id: string; type: 'db_list'; store: string; prefix: string }
     | { id: string; type: 'visibility_change'; hidden: boolean };
 
+export type DiagnosticsLevel = 'debug' | 'info' | 'warn' | 'error';
+
+export type DiagnosticsComponent = 'worker' | 'runtime';
+
+export type DiagnosticsContextValue = string | number | boolean | null;
+
+export type DiagnosticsContext = Record<string, DiagnosticsContextValue>;
+
+export interface DiagnosticsEvent {
+    component: DiagnosticsComponent;
+    level: DiagnosticsLevel;
+    phase?: string;
+    message: string;
+    detail?: string;
+    context?: DiagnosticsContext;
+}
+
 // ── Worker outbound (worker → main) ──────────────────────────────────────────
 export type WorkerOutbound =
     | { id: string; type: 'ready' }
@@ -34,6 +51,7 @@ export type WorkerOutbound =
     | { id: string; type: 'db_del_result'; ok: boolean }
     | { id: string; type: 'db_list_result'; entries: Array<{ key: string; value: string }> }
     | { id: string; type: 'error'; error: string }
+    | { id: string; type: 'diagnostics'; event: DiagnosticsEvent }
     | { id: string; type: 'log'; message: string };
 
 // ── Bridge envelope (JS → native host bridge) ────────────────────────────────
@@ -41,6 +59,7 @@ export type BridgeEnvelope =
     | { type: 'js_error'; timestamp: string; message: string; stack?: string; source?: string; line?: number; col?: number }
     | { type: 'unhandled_rejection'; timestamp: string; message: string; stack?: string }
     | { type: 'log'; timestamp: string; message: string }
+    | ({ type: 'diagnostics'; timestamp: string } & DiagnosticsEvent)
     | { type: 'lifecycle'; timestamp: string; message: string }
     | { type: 'crypto_result'; timestamp: string; id: string; message: string; error?: string };
 

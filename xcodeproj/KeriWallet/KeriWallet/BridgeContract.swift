@@ -42,6 +42,7 @@ enum BridgeContract {
     static let bridgeJsError = "js_error"
     static let bridgeUnhandledRejection = "unhandled_rejection"
     static let bridgeLog = "log"
+    static let bridgeDiagnostics = "diagnostics"
     static let bridgeLifecycle = "lifecycle"
     static let bridgeCryptoResult = "crypto_result"
 
@@ -49,6 +50,7 @@ enum BridgeContract {
         bridgeJsError,
         bridgeUnhandledRejection,
         bridgeLog,
+        bridgeDiagnostics,
         bridgeLifecycle,
         bridgeCryptoResult,
     ]
@@ -89,6 +91,7 @@ enum BridgeContract {
     static let workerResDbDelResult = "db_del_result"
     static let workerResDbListResult = "db_list_result"
     static let workerResError = "error"
+    static let workerResDiagnostics = "diagnostics"
     static let workerResLog = "log"
 
     static let allWorkerResultTypes: [String] = [
@@ -102,6 +105,7 @@ enum BridgeContract {
         workerResDbDelResult,
         workerResDbListResult,
         workerResError,
+        workerResDiagnostics,
         workerResLog,
     ]
 }

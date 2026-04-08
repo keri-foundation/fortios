@@ -7,8 +7,8 @@
 // Type definitions and constants are imported from shared modules (types.ts, constants.ts)
 // and bundled by Vite at build time — the worker runtime uses importScripts only for Pyodide.
 
-import { BLAKE3_WHEEL, PYCHLORIDE_WHEEL, WORKER_LOG_ID } from '../shared/constants';
-import type { PyodideInterface, WorkerInbound, WorkerOutbound } from '../shared/types';
+import { BLAKE3_WHEEL, PYCHLORIDE_WHEEL, WORKER_DIAGNOSTICS_ID } from '../shared/constants';
+import type { DiagnosticsContext, DiagnosticsLevel, PyodideInterface, WorkerInbound, WorkerOutbound } from '../shared/types';
 import type { KVFactory } from './worker_router';
 import { openIdbKVFactory, routeMessage } from './worker_router';
 
@@ -24,9 +24,29 @@ let pyodide: PyodideInterface | null = null;
 let kvFactory: KVFactory | null = null;
 let booted = false;
 
-/** Fire-and-forget log message back to main thread (forwarded to bridge). */
-function workerLog(msg: string): void {
-    self.postMessage({ id: WORKER_LOG_ID, type: 'log', message: `[worker] ${msg}` } satisfies WorkerOutbound);
+type WorkerDiagnosticOptions = {
+    level?: DiagnosticsLevel;
+    detail?: string;
+    context?: DiagnosticsContext;
+};
+
+function workerDiagnostic(
+    phase: string,
+    message: string,
+    options: WorkerDiagnosticOptions = {},
+): void {
+    self.postMessage({
+        id: WORKER_DIAGNOSTICS_ID,
+        type: 'diagnostics',
+        event: {
+            component: 'worker',
+            level: options.level ?? 'info',
+            phase,
+            message,
+            detail: options.detail,
+            context: options.context,
+        },
+    } satisfies WorkerOutbound);
 }
 
 /**
@@ -77,10 +97,10 @@ async function boot(baseUrl: string): Promise<void> {
     pythonBase = new URL('./python/', baseUrl).toString();
 
     // importScripts is synchronous — injects loadPyodide() into the worker scope.
-    workerLog('loading pyodide.js');
+    workerDiagnostic('pyodide', 'loading pyodide.js');
     self.importScripts(`${pyodideBase}pyodide.js`);
 
-    workerLog('initializing pyodide runtime');
+    workerDiagnostic('pyodide', 'initializing pyodide runtime');
     pyodide = await loadPyodide({ indexURL: pyodideBase });
 
     // Wheels are bundled offline in public/pyodide/wheels/ — no CDN.
@@ -91,14 +111,14 @@ async function boot(baseUrl: string): Promise<void> {
     // Fetch wheels via JS fetch() (works with app:// scheme handler) and
     // unpack directly into site-packages using pyodide.unpackArchive().
     // This bypasses micropip entirely — no URL parsing, no network resolution.
-    workerLog('fetching + unpacking wheels');
+    workerDiagnostic('wheels', 'fetching and unpacking wheels', { context: { count: 2 } });
     await Promise.all([
         installWheel(blake3Url),
         installWheel(pychlorideUrl),
     ]);
 
     // Install Python shim modules (pysodium compat, lmdb stub, IndexedDB backend)
-    workerLog('installing python shims + IndexedDB backend');
+    workerDiagnostic('python', 'installing python shims and IndexedDB backend');
     await Promise.all([
         installPythonFile(`${pythonBase}pysodium.py`, '/home/pyodide/pysodium.py'),
         installPythonFile(`${pythonBase}lmdb.py`, '/home/pyodide/lmdb.py'),
@@ -108,18 +128,18 @@ async function boot(baseUrl: string): Promise<void> {
     // Install hio subset (required for keripy imports: doing, decking, ogling, etc.)
     // The file list is driven by hio-manifest.json — generated at build time by
     // build-payload.sh so the build script is the single source of truth.
-    workerLog('installing hio subset');
+    workerDiagnostic('hio', 'installing hio subset');
     const hioBase = `${pythonBase}hio/`;
     const hioRoot = '/home/pyodide/hio';
     const hioCount = await installPythonTree(`${pythonBase}hio-manifest.json`, hioBase, hioRoot);
-    workerLog(`hio subset installed (${hioCount} files)`);
+    workerDiagnostic('hio', 'hio subset installed', { context: { files: hioCount } });
 
     // Install the first bounded Locksmith subset from the real Locksmith repo.
-    workerLog('installing locksmith subset');
+    workerDiagnostic('locksmith', 'installing locksmith subset');
     const locksmithBase = `${pythonBase}locksmith/`;
     const locksmithRoot = '/home/pyodide/locksmith';
     const locksmithCount = await installPythonTree(`${pythonBase}locksmith-manifest.json`, locksmithBase, locksmithRoot);
-    workerLog(`locksmith subset installed (${locksmithCount} files)`);
+    workerDiagnostic('locksmith', 'locksmith subset installed', { context: { files: locksmithCount } });
 
     await pyodide.runPythonAsync(`
 import sys as _sys
@@ -137,17 +157,21 @@ if '/home/pyodide' not in _sys.path:
     // Pyodide's create_proxy callbacks don't fire in WKWebView blob: Workers,
     // so Python↔IDB is broken.  Instead we open a plain JS IndexedDB store
     // and handle db_put / db_get / db_del / db_list entirely in JavaScript.
-    workerLog('opening JS-level IndexedDB');
+    workerDiagnostic('persistence', 'opening JS-level IndexedDB');
     try {
         kvFactory = await openIdbKVFactory();
-        workerLog('IndexedDB ready (JS-level persistence)');
+        workerDiagnostic('persistence', 'IndexedDB ready', { context: { backend: 'IndexedDB' } });
     } catch (e) {
-        workerLog(`IndexedDB open failed — ephemeral mode: ${e}`);
+        workerDiagnostic('persistence', 'IndexedDB open failed; using ephemeral mode', {
+            level: 'warn',
+            detail: String(e),
+            context: { backend: 'ephemeral' },
+        });
         kvFactory = null;
     }
 
     // Pre-import crypto modules.
-    workerLog('importing crypto modules');
+    workerDiagnostic('crypto', 'importing crypto modules');
     await pyodide.runPythonAsync(`
 import blake3 as _blake3
 import pychloride as _sodium
@@ -157,7 +181,7 @@ import locksmith.core.crypto as _locksmith_crypto
 `);
 
     // Generate ephemeral Ed25519 session keypair (not persisted across launches).
-    workerLog('generating ephemeral session keypair');
+    workerDiagnostic('crypto', 'generating ephemeral session keypair');
     await pyodide.runPythonAsync(`
 _kp = _sodium.crypto_sign_keypair()
 _pk_bytes = _kp[0]
@@ -165,7 +189,12 @@ _sk_bytes = _kp[1]
 `);
 
     booted = true;
-    workerLog(`boot complete — crypto ready, persistence: ${kvFactory ? 'IndexedDB' : 'ephemeral'}`);
+    workerDiagnostic('boot', 'boot complete', {
+        context: {
+            crypto: 'ready',
+            persistence: kvFactory ? 'IndexedDB' : 'ephemeral',
+        },
+    });
 }
 
 self.onmessage = async (ev: MessageEvent<WorkerInbound>) => {
@@ -175,13 +204,21 @@ self.onmessage = async (ev: MessageEvent<WorkerInbound>) => {
     if (cmd.type === 'visibility_change') {
         if (cmd.hidden) {
             kvFactory?.close();
-            workerLog('visibility: hidden — closed IndexedDB');
+            workerDiagnostic('visibility', 'closed IndexedDB because app is hidden', {
+                context: { hidden: true },
+            });
         } else if (!kvFactory) {
             try {
                 kvFactory = await openIdbKVFactory();
-                workerLog('visibility: visible — reopened IndexedDB');
+                workerDiagnostic('visibility', 'reopened IndexedDB after returning to foreground', {
+                    context: { hidden: false },
+                });
             } catch (e) {
-                workerLog(`visibility: reopen failed — ephemeral mode: ${e}`);
+                workerDiagnostic('visibility', 'failed to reopen IndexedDB; keeping ephemeral mode', {
+                    level: 'warn',
+                    detail: String(e),
+                    context: { hidden: false, backend: 'ephemeral' },
+                });
             }
         }
         return;
@@ -196,6 +233,11 @@ self.onmessage = async (ev: MessageEvent<WorkerInbound>) => {
             out = await routeMessage(cmd, pyodide, booted, kvFactory);
         }
     } catch (e) {
+        workerDiagnostic('command', `${cmd.type} failed`, {
+            level: 'error',
+            detail: String(e),
+            context: { command: cmd.type },
+        });
         out = { id: cmd.id, type: 'error', error: String(e) };
     }
     self.postMessage(out);
