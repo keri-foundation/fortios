@@ -107,6 +107,15 @@ make open
 
 Run `make help` at any time to list all available targets.
 
+The fast security checks for the shared payload are intentionally small:
+
+- `make lint-ts` for TypeScript compile-time validation
+- `npm run bridge:check` for cross-language bridge drift
+- CI secrets scanning for accidental credential commits
+
+If you want a dependency-vulnerability report for the Node toolchain, run `npm audit` manually.
+That is best treated as a dependency-refresh lane rather than as the default PR gate, because the current advisories are in the frontend build toolchain and can require coordinated version bumps.
+
 ---
 
 ## 4. Make targets reference
