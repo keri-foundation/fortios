@@ -8,6 +8,11 @@ final class WebNavigationPolicyTests: XCTestCase {
         XCTAssertTrue(policy.isAllowed(url: URL(string: AppConfig.Scheme.entryURL)!))
     }
 
+    func test_blocks_app_scheme_with_unexpected_host() {
+        let policy = WebNavigationPolicy()
+        XCTAssertFalse(policy.isAllowed(url: URL(string: "app://evil/index.html")!))
+    }
+
     func test_allows_about_blank_only() {
         let policy = WebNavigationPolicy()
         XCTAssertTrue(policy.isAllowed(url: URL(string: "about:blank")!))

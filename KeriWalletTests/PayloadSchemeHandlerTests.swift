@@ -163,6 +163,20 @@ struct PathNormalisationTests {
         }
     }
 
+    @Test("unexpected app host throws invalidURL")
+    func wrongHostThrows() throws {
+        let tmp: URL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        let handler = makeHandler(dir: tmp)
+        let url: URL = URL(string: "\(AppConfig.Scheme.name)://evil/index.html")!
+        #expect(throws: PayloadSchemeError.invalidURL) {
+            _ = try handler.loadResource(for: url)
+        }
+    }
+
     @Test("COOP/COEP/CORP headers are present in response")
     func crossOriginIsolationHeaders() throws {
         let tmp: URL = FileManager.default.temporaryDirectory

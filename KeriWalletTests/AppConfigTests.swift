@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 
 @testable import KeriWallet
@@ -16,6 +17,11 @@ struct AppConfigTests {
     @Test("entry URL uses the registered scheme name")
     func entryURLUsesScheme() {
         #expect(AppConfig.Scheme.entryURL.hasPrefix(AppConfig.Scheme.name + "://"))
+    }
+
+    @Test("entry URL uses the expected local host")
+    func entryURLUsesExpectedHost() {
+        #expect(URL(string: AppConfig.Scheme.entryURL)?.host == AppConfig.Scheme.host)
     }
 
     @Test("defaultIndexPath is index.html")
