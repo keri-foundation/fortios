@@ -5,7 +5,15 @@ on:
     paths:
       - 'src/**'
       - 'public/**'
+      - 'playwright/**'
+      - 'scripts/**'
       - 'tools/**'
+      - 'Makefile'
+      - 'playwright.config.ts'
+      - 'vite.config.ts'
+      - 'xcodeproj/**'
+      - 'KeriWalletTests/**'
+      - 'KeriWalletUITests/**'
       - 'package.json'
       - 'package-lock.json'
       - 'bridge-contract.json'
@@ -16,7 +24,15 @@ on:
     paths:
       - 'src/**'
       - 'public/**'
+      - 'playwright/**'
+      - 'scripts/**'
       - 'tools/**'
+      - 'Makefile'
+      - 'playwright.config.ts'
+      - 'vite.config.ts'
+      - 'xcodeproj/**'
+      - 'KeriWalletTests/**'
+      - 'KeriWalletUITests/**'
       - 'package.json'
       - 'package-lock.json'
       - 'bridge-contract.json'
@@ -24,7 +40,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  payload-security:
+  payload-checks:
     runs-on: ubuntu-latest
 
     steps:
@@ -48,6 +64,15 @@ jobs:
       - name: Run TypeScript checks
         run: npm run typecheck
 
+      - name: Run TypeScript unit tests
+        run: make test-ts
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Run fast Playwright smoke tests
+        run: make test-e2e
+
       - name: Scan for secrets
         run: |
           docker run --rm \
@@ -55,3 +80,13 @@ jobs:
             -w /repo \
             ghcr.io/gitleaks/gitleaks:v8.30.1 \
             git --no-banner --redact --exit-code 1 .
+
+  swift-tests:
+    runs-on: macos-15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Run Swift unit and UI tests
+        run: make test-swift SIMULATOR_NAME='iPhone 16' SIMULATOR_OS=latest

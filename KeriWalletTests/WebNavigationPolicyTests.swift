@@ -8,6 +8,11 @@ final class WebNavigationPolicyTests: XCTestCase {
         XCTAssertTrue(policy.isAllowed(url: URL(string: AppConfig.Scheme.entryURL)!))
     }
 
+    func test_allows_uppercase_app_scheme() {
+        let policy = WebNavigationPolicy()
+        XCTAssertTrue(policy.isAllowed(url: URL(string: "APP://local/index.html")!))
+    }
+
     func test_allows_about_blank_only() {
         let policy = WebNavigationPolicy()
         XCTAssertTrue(policy.isAllowed(url: URL(string: "about:blank")!))
@@ -17,5 +22,10 @@ final class WebNavigationPolicyTests: XCTestCase {
     func test_blocks_https() {
         let policy = WebNavigationPolicy()
         XCTAssertFalse(policy.isAllowed(url: URL(string: "https://example.com")!))
+    }
+
+    func test_blocks_file_urls() {
+        let policy = WebNavigationPolicy()
+        XCTAssertFalse(policy.isAllowed(url: URL(fileURLWithPath: "/tmp/index.html")))
     }
 }
