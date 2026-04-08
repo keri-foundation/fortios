@@ -77,7 +77,10 @@ final class PayloadSchemeHandler: NSObject, WKURLSchemeHandler {
     /// can exercise the full request-handling logic without requiring a live
     /// `WKURLSchemeTask`. Production callers use the `WKURLSchemeHandler` protocol.
     func loadResource(for url: URL) throws -> (Data, String, [String: String]) {
-        guard url.scheme?.lowercased() == AppConfig.Scheme.name else {
+        guard
+            url.scheme?.lowercased() == AppConfig.Scheme.name,
+            url.host?.lowercased() == AppConfig.Scheme.host
+        else {
             throw PayloadSchemeError.invalidURL
         }
 

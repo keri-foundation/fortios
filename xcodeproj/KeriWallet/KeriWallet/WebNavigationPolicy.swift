@@ -13,7 +13,11 @@ struct WebNavigationPolicy {
         if scheme == "about" {
             return url.absoluteString == AppConfig.Scheme.aboutBlankURL
         }
-        return allowedSchemes.contains(scheme)
+        guard allowedSchemes.contains(scheme) else { return false }
+        if scheme == AppConfig.Scheme.name {
+            return url.host?.lowercased() == AppConfig.Scheme.host
+        }
+        return true
     }
 }
 

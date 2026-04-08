@@ -21,6 +21,8 @@ enum AppConfig {
     enum Scheme {
         /// Custom URL scheme registered with WKWebView for serving bundled assets.
         static let name = "app"
+        /// The only host accepted for bundled payload URLs.
+        static let host = "local"
         /// Initial URL loaded by the web container.
         static let entryURL = "app://local/index.html"
         /// Schemes the navigation policy allows. `about` is needed for `about:blank`.
