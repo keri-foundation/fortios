@@ -43,6 +43,18 @@ struct WebBridgeEnvelopeTests {
         #expect(env.message == "hello")
     }
 
+    @Test("decodes diagnostics message with structured fields")
+    func decodesDiagnostics() throws {
+        let env = try envelope("""
+        {"type":"diagnostics","timestamp":"t","message":"IndexedDB ready","component":"worker","level":"info","phase":"persistence","detail":"opened successfully"}
+        """)
+        #expect(env.type == .diagnostics)
+        #expect(env.component == "worker")
+        #expect(env.level == "info")
+        #expect(env.phase == "persistence")
+        #expect(env.detail == "opened successfully")
+    }
+
     @Test("decodes crypto_result message")
     func decodesCryptoResult() throws {
         let env = try envelope("""
@@ -120,6 +132,7 @@ struct BridgeContractTests {
         #expect(WebBridgeMessageType.jsError.rawValue == BridgeContract.bridgeJsError)
         #expect(WebBridgeMessageType.unhandledRejection.rawValue == BridgeContract.bridgeUnhandledRejection)
         #expect(WebBridgeMessageType.log.rawValue == BridgeContract.bridgeLog)
+        #expect(WebBridgeMessageType.diagnostics.rawValue == BridgeContract.bridgeDiagnostics)
         #expect(WebBridgeMessageType.lifecycle.rawValue == BridgeContract.bridgeLifecycle)
         #expect(WebBridgeMessageType.cryptoResult.rawValue == BridgeContract.bridgeCryptoResult)
     }
