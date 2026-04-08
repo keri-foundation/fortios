@@ -24,7 +24,6 @@ import {
     BRIDGE_DIAGNOSTICS,
     WORKER_COMMAND_TYPES,
     WORKER_RESULT_TYPES,
-    BRIDGE_MESSAGE_TYPES,
 } from './bridge-contract';
 
 describe('constants', () => {
