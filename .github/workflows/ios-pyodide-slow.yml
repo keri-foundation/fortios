@@ -1,5 +1,8 @@
 name: iOS Slow Pyodide Checks
 
+permissions:
+  contents: read
+
 on:
   workflow_dispatch:
   schedule:
@@ -14,23 +17,32 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Check out KeriWasm dependency
+        uses: actions/checkout@v4
+        with:
+          repository: WebOfTrust/KeriWasm
+          path: .deps/keriwasm
+
+      - name: Check out Locksmith dependency
+        uses: actions/checkout@v4
+        with:
+          repository: keri-foundation/locksmith
+          path: .deps/locksmith
+
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
           node-version: '22.12.0'
           cache: npm
 
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Stage committed WebPayload snapshot
+      - name: Build slow-lane payload
+        env:
+          KERIWASM_DIR: ${{ github.workspace }}/.deps/keriwasm
+          KERIWASM_PYTHON_DIR: ${{ github.workspace }}/.deps/keriwasm/python
+          LOCKSMITH_PYTHON_DIR: ${{ github.workspace }}/.deps/locksmith/src/locksmith
         run: |
-          test -f WebPayload/index.html
-          test -f WebPayload/python/hio-manifest.json
-          test -f WebPayload/python/locksmith-manifest.json
-          rm -rf dist
-          mkdir -p dist
-          cp -R WebPayload/. dist/
+          make pyodide
+          ./sync-payload.sh
 
       - name: Install Playwright browser
         run: npx playwright install --with-deps chromium

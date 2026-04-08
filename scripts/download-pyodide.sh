@@ -8,7 +8,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PAYLOAD_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
-KERIWASM_DIR="$(cd "${PAYLOAD_DIR}/../../libs/keriwasm" && pwd)"
+KERIWASM_DIR="${KERIWASM_DIR:-${PAYLOAD_DIR}/../../libs/keriwasm}"
+KERIWASM_DIR="$(cd "${KERIWASM_DIR}" && pwd)"
 
 OUT_DIR="${PAYLOAD_DIR}/public/pyodide"
 WHEELS_DIR="${OUT_DIR}/wheels"

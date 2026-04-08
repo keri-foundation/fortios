@@ -86,7 +86,7 @@ jobs:
             -v "$GITHUB_WORKSPACE:/repo" \
             -w /repo \
             ghcr.io/gitleaks/gitleaks:v8.30.1 \
-            git --no-banner --redact --exit-code 1 .
+            dir --no-banner --redact --exit-code 1 .
 
   swift-tests:
     runs-on: macos-15
@@ -94,6 +94,33 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - name: Check out KeriWasm dependency
+        uses: actions/checkout@v4
+        with:
+          repository: WebOfTrust/KeriWasm
+          path: .deps/keriwasm
+
+      - name: Check out Locksmith dependency
+        uses: actions/checkout@v4
+        with:
+          repository: keri-foundation/locksmith
+          path: .deps/locksmith
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.12.0'
+          cache: npm
+
+      - name: Build bundled WebPayload for Xcode tests
+        env:
+          KERIWASM_DIR: ${{ github.workspace }}/.deps/keriwasm
+          KERIWASM_PYTHON_DIR: ${{ github.workspace }}/.deps/keriwasm/python
+          LOCKSMITH_PYTHON_DIR: ${{ github.workspace }}/.deps/locksmith/src/locksmith
+        run: |
+          make pyodide
+          ./sync-payload.sh
 
       - name: Run Swift unit and UI tests
         run: make test-swift
