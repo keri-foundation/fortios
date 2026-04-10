@@ -23,6 +23,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PAYLOAD_DIR="${SCRIPT_DIR}"
 PAYLOAD_DIST_DIR="${PAYLOAD_DIR}/dist"
 MANIFEST_PATH="${PAYLOAD_DIST_DIR}/build-manifest.json"
+KERIWASM_PYTHON_DIR="${KERIWASM_PYTHON_DIR:-${SCRIPT_DIR}/../keriwasm/python}"
+LOCKSMITH_PYTHON_DIR="${LOCKSMITH_PYTHON_DIR:-${SCRIPT_DIR}/../locksmith/src/locksmith}"
 
 # Export for callers that source this script
 export PAYLOAD_DIR PAYLOAD_DIST_DIR MANIFEST_PATH
@@ -84,14 +86,12 @@ echo "[build-payload] pyodide bundle ok ($(du -sh "${PAYLOAD_DIR}/dist/pyodide" 
 # Compatibility shims (pysodium, lmdb), the IndexedDB backend, and the hio
 # subset live in keriwasm/python/ — the single source of truth for all Pyodide
 # Python files.  We cherry-pick only the files needed at runtime.
-KERIWASM_PYTHON_DIR="${SCRIPT_DIR}/../keriwasm/python"
 PYTHON_FILES=(indexeddb_python.py pysodium.py lmdb.py)
-LOCKSMITH_PYTHON_DIR="${SCRIPT_DIR}/../locksmith/src/locksmith"
 LOCKSMITH_FILES=(__init__.py core/crypto.py)
 
 if [[ ! -d "${KERIWASM_PYTHON_DIR}" ]]; then
   echo "error: keriwasm/python/ not found at ${KERIWASM_PYTHON_DIR}" 1>&2
-  echo "       Ensure libs/keriwasm is checked out alongside Fort-ios" 1>&2
+  echo "       Set KERIWASM_PYTHON_DIR or ensure libs/keriwasm is checked out alongside Fort-ios" 1>&2
   exit 1
 fi
 
@@ -107,7 +107,7 @@ done
 
 if [[ ! -d "${LOCKSMITH_PYTHON_DIR}" ]]; then
   echo "error: locksmith/src/locksmith not found at ${LOCKSMITH_PYTHON_DIR}" 1>&2
-  echo "       Ensure libs/locksmith is checked out alongside Fort-ios" 1>&2
+  echo "       Set LOCKSMITH_PYTHON_DIR or ensure libs/locksmith is checked out alongside Fort-ios" 1>&2
   exit 1
 fi
 

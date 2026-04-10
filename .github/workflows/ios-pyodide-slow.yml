@@ -1,0 +1,51 @@
+name: iOS Slow Pyodide Checks
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 10 * * *'
+
+jobs:
+  pyodide-roundtrip:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Check out KeriWasm dependency
+        uses: actions/checkout@v4
+        with:
+          repository: WebOfTrust/KeriWasm
+          path: .deps/keriwasm
+
+      - name: Check out Locksmith dependency
+        uses: actions/checkout@v4
+        with:
+          repository: keri-foundation/locksmith
+          path: .deps/locksmith
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.12.0'
+          cache: npm
+
+      - name: Build slow-lane payload
+        env:
+          KERIWASM_DIR: ${{ github.workspace }}/.deps/keriwasm
+          KERIWASM_PYTHON_DIR: ${{ github.workspace }}/.deps/keriwasm/python
+          LOCKSMITH_PYTHON_DIR: ${{ github.workspace }}/.deps/locksmith/src/locksmith
+        run: |
+          make pyodide
+          ./sync-payload.sh
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Run slow Pyodide roundtrip
+        run: npx playwright test --grep "@slow"

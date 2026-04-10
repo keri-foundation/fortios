@@ -91,36 +91,17 @@ test.describe('@slow Pyodide roundtrip', () => {
     test.setTimeout(120_000); // 2 minutes for WASM boot
 
     test('worker reaches ready state', async ({ page }) => {
-        // Inject a spy on postMessage before page runs
-        await page.addInitScript(() => {
-            const messages: unknown[] = [];
-            (window as unknown as { __workerMessages: unknown[] }).__workerMessages = messages;
-            // Intercept bridge postMessage via webkit mock
-            (window as unknown as { webkit: unknown }).webkit = {
-                messageHandlers: {
-                    bridge: {
-                        postMessage: (msg: unknown) => {
-                            messages.push(msg);
-                        },
-                    },
-                },
-            };
-        });
-
         await page.goto('/');
 
-        // Wait for a lifecycle:ready message to be posted to the bridge
-        await page.waitForFunction(
-            () => {
-                const msgs = (window as unknown as { __workerMessages?: Array<{ type: string; message?: string }> }).__workerMessages ?? [];
-                return msgs.some((m) => m.type === 'lifecycle' && m.message === 'ready');
-            },
-            { timeout: 90_000, polling: 1000 },
-        );
+        await expect(page.locator('#status')).toHaveText('Locksmith shell ready', {
+            timeout: 90_000,
+        });
 
-        const messages = await page.evaluate(
-            () => (window as unknown as { __workerMessages: unknown[] }).__workerMessages,
-        );
-        expect(messages.some((m) => (m as { type: string }).type === 'lifecycle')).toBe(true);
+        await expect(page.locator('#output')).toContainText('pychloride sign+verify: true', {
+            timeout: 30_000,
+        });
+        await expect(page.locator('#output')).toContainText('locksmith stretch:', {
+            timeout: 30_000,
+        });
     });
 });
