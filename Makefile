@@ -30,7 +30,7 @@ SIMULATOR_DEST := platform=iOS Simulator,name=$(SIMULATOR_NAME),OS=$(SIMULATOR_O
 endif
 endif
 
-.PHONY: help setup pyodide sync ios-doctor ios-list-sims ios-list-devices require-simulator require-device-ref isolate-sim focus-sim build build-sim install-sim launch-sim run-sim build-device install-device launch-device run run-device dev-sim dev-device logs-sim logs-device open-console parity-manifest parity-smoke test-swift test-ts test-e2e test-e2e-slow test-all bridge-check lint lint-ts open clean archive export upload
+.PHONY: help setup pyodide sync ios-doctor ios-list-sims ios-list-devices require-simulator require-device-ref isolate-sim focus-sim build build-sim install-sim launch-sim run-sim build-device install-device launch-device run run-device dev-sim dev-device logs-sim logs-device open-console parity-manifest parity-smoke test-swift test-swift-ui test-ts test-e2e test-e2e-slow test-all bridge-check lint lint-ts open clean archive export upload
 
 help: ## Show available make targets
 	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | \
@@ -190,7 +190,7 @@ parity-smoke: require-device-ref sync isolate-sim run-sim run-device parity-mani
 	@echo "parity-smoke ok: both destinations launched from the same payload hash."
 	@echo "Next manual step: on both destinations tap 'Seed Test Data' then 'List Identifiers' and compare the visible result plus logs."
 
-test-swift: ## Run Swift unit + UI tests on iOS Simulator
+test-swift: ## Run Swift unit tests on iOS Simulator (no payload needed)
 	@mkdir -p WebPayload
 	rm -rf $(TEST_RESULTS)
 	xcodebuild test \
@@ -198,11 +198,24 @@ test-swift: ## Run Swift unit + UI tests on iOS Simulator
 	  -scheme $(SCHEME) \
 	  -configuration Debug \
 	  -destination '$(SIMULATOR_DEST)' \
+	  -only-testing:KeriWalletTests \
 	  -resultBundlePath $(TEST_RESULTS) \
 	  -derivedDataPath $(DERIVED_DATA_SIM) \
 	  -parallel-testing-enabled NO
 
-test-all: test-swift test-ts test-e2e ## Run Swift + TS + E2E tests
+test-swift-ui: ## Run Swift UI tests on iOS Simulator (requires WebPayload)
+	rm -rf $(TEST_RESULTS)
+	xcodebuild test \
+	  -project $(XCODE_PROJECT) \
+	  -scheme $(SCHEME) \
+	  -configuration Debug \
+	  -destination '$(SIMULATOR_DEST)' \
+	  -only-testing:KeriWalletUITests \
+	  -resultBundlePath $(TEST_RESULTS) \
+	  -derivedDataPath $(DERIVED_DATA_SIM) \
+	  -parallel-testing-enabled NO
+
+test-all: test-swift test-swift-ui test-ts test-e2e ## Run Swift + UI + TS + E2E tests
 
 open: ## Open KeriWallet.xcodeproj in Xcode
 	open $(XCODE_PROJECT)
