@@ -134,6 +134,7 @@ build: ## Build KeriWallet for iOS Simulator (Debug)
 	  -derivedDataPath $(SIM_DERIVED_DATA)
 
 test-swift: ## Run Swift unit + UI tests on iOS Simulator
+	rm -rf $(TEST_RESULTS)
 	xcodebuild test \
 	  -project $(XCODE_PROJECT) \
 	  -scheme $(SCHEME) \
