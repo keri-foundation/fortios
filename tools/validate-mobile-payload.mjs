@@ -23,6 +23,13 @@ const BANNED_MARKERS = [
     'List Identifiers',
     'fortweb proof vector v1',
 ];
+const IOS_WRAPPER_CONTRACT = {
+    producer: 'fortweb-shared',
+    payloadProfile: 'product-shell',
+    entryDocument: 'fortweb/app/index.html',
+    entryScript: 'fortweb/app/app/main.js',
+    wrapperIndexRedirect: './fortweb/app/index.html',
+};
 
 function parseArgs(argv) {
     const options = {
@@ -96,6 +103,64 @@ function validateManifest(manifest, target) {
         errors.push(`manifest does not declare sync target: ${target}`);
     }
 
+    if (target === 'ios-webpayload') {
+        if (manifest.producer !== IOS_WRAPPER_CONTRACT.producer) {
+            errors.push(
+                `ios-webpayload requires producer ${IOS_WRAPPER_CONTRACT.producer}: ${manifest.producer}`
+            );
+        }
+
+        if (manifest.payload_profile !== IOS_WRAPPER_CONTRACT.payloadProfile) {
+            errors.push(
+                `ios-webpayload requires payload profile ${IOS_WRAPPER_CONTRACT.payloadProfile}: ${manifest.payload_profile}`
+            );
+        }
+
+        if (manifest.entry_document !== IOS_WRAPPER_CONTRACT.entryDocument) {
+            errors.push(
+                `ios-webpayload requires entry document ${IOS_WRAPPER_CONTRACT.entryDocument}: ${manifest.entry_document}`
+            );
+        }
+
+        if (manifest.entry_script !== IOS_WRAPPER_CONTRACT.entryScript) {
+            errors.push(
+                `ios-webpayload requires entry script ${IOS_WRAPPER_CONTRACT.entryScript}: ${manifest.entry_script}`
+            );
+        }
+    }
+
+    return errors;
+}
+
+async function validateWrapperLayout(payloadDir, target) {
+    const errors = [];
+
+    if (target !== 'ios-webpayload') {
+        return errors;
+    }
+
+    let wrapperIndex;
+    try {
+        wrapperIndex = await readFile(path.join(payloadDir, 'index.html'), 'utf8');
+    } catch {
+        errors.push('ios-webpayload missing wrapper root document: index.html');
+        return errors;
+    }
+
+    if (!wrapperIndex.includes(IOS_WRAPPER_CONTRACT.wrapperIndexRedirect)) {
+        errors.push(
+            `ios-webpayload wrapper root must redirect to ${IOS_WRAPPER_CONTRACT.wrapperIndexRedirect}`
+        );
+    }
+
+    try {
+        await readFile(path.join(payloadDir, IOS_WRAPPER_CONTRACT.entryDocument), 'utf8');
+    } catch {
+        errors.push(
+            `ios-webpayload missing FortWeb entry document: ${IOS_WRAPPER_CONTRACT.entryDocument}`
+        );
+    }
+
     return errors;
 }
 
@@ -127,6 +192,7 @@ async function main() {
     const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
 
     const manifestErrors = validateManifest(manifest, target);
+    const layoutErrors = await validateWrapperLayout(payloadDir, target);
     const markerMatches = await scanForBannedMarkers(payloadDir);
 
     console.log(`[payload-check] payload directory: ${payloadDir}`);
@@ -138,12 +204,16 @@ async function main() {
     console.log(`[payload-check] worker mode: ${manifest.pyodide_worker_mode ?? 'missing'}`);
     console.log(`[payload-check] pyodide asset: ${manifest.pyodide_asset_path ?? 'missing'} (${manifest.pyodide_asset_mode ?? 'missing'})`);
 
-    if (manifestErrors.length === 0 && markerMatches.length === 0) {
+    if (manifestErrors.length === 0 && layoutErrors.length === 0 && markerMatches.length === 0) {
         console.log('[payload-check] result: PASS');
         return;
     }
 
     for (const error of manifestErrors) {
+        console.log(`[payload-check] violation: ${error}`);
+    }
+
+    for (const error of layoutErrors) {
         console.log(`[payload-check] violation: ${error}`);
     }
 
