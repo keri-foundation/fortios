@@ -3,9 +3,8 @@
 #
 # iOS-specific payload sync entrypoint.
 #
-# Supports two payload sources:
-#   1. fortweb   - mainline convergence path copied into WebPayload/fortweb/
-#   2. fort-ios  - legacy local Vite/TypeScript proof harness built via build-payload.sh
+# Supports one payload source:
+#   fortweb - mainline convergence path copied into WebPayload/fortweb/
 
 set -euo pipefail
 
@@ -38,34 +37,6 @@ write_fortweb_manifest() {
     --payload-root "${WRAPPER_PAYLOAD_DIR}" \
     --fortweb-dir "${FORTWEB_DIR}" \
     --build-command 'PAYLOAD_SOURCE=fortweb ./sync-payload.sh'
-}
-
-sync_fortios_payload() {
-  source "${SCRIPT_DIR}/build-payload.sh"
-
-  STDLIB_ZIP="${PAYLOAD_DIST_DIR}/pyodide/python_stdlib.zip"
-  if [[ -f "${STDLIB_ZIP}" ]]; then
-    SCRATCH=$(mktemp -d)
-    trap 'rm -rf "${SCRATCH}"' EXIT
-    unzip -q "${STDLIB_ZIP}" -d "${SCRATCH}"
-    find "${SCRATCH}" -type d -name "__pycache__" -exec rm -r {} + 2>/dev/null || true
-    find "${SCRATCH}" -type f -name '*.pyc' -delete
-    find "${SCRATCH}" -type f -name '*.py' -exec \
-      perl -pi -e 's/itms-services/itms_services/g' {} +
-    (cd "${SCRATCH}" && zip -qr "${STDLIB_ZIP}" .)
-    echo "[sync-payload] sanitized itms-services in python_stdlib.zip (*.pyc purged)"
-    rm -rf "${SCRATCH}"
-    trap - EXIT
-  fi
-
-  node "${PAYLOAD_VALIDATOR}" \
-    --payload-dir "${PAYLOAD_DIST_DIR}" \
-    --target ios-webpayload
-
-  echo "[sync-payload] syncing into wrapper WebPayload/"
-  mkdir -p "${WRAPPER_PAYLOAD_DIR}"
-  rm -rf "${WRAPPER_PAYLOAD_DIR}"/*
-  cp -R "${PAYLOAD_DIST_DIR}"/. "${WRAPPER_PAYLOAD_DIR}/"
 }
 
 sync_fortweb_payload() {
@@ -107,14 +78,12 @@ sync_fortweb_payload() {
 }
 
 case "${PAYLOAD_SOURCE}" in
-  fort-ios)
-    sync_fortios_payload
-    ;;
   fortweb)
     sync_fortweb_payload
     ;;
   *)
     echo "error: unsupported PAYLOAD_SOURCE=${PAYLOAD_SOURCE}" 1>&2
+    echo "       Only PAYLOAD_SOURCE=fortweb is supported for live wrapper sync." 1>&2
     exit 1
     ;;
 esac
