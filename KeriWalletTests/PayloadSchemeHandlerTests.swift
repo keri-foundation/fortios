@@ -11,6 +11,17 @@ private func writeFile(_ url: URL, content: String) throws -> URL {
     return url
 }
 
+private func writeValidPayloadManifest(_ dir: URL) throws {
+        let manifest = """
+        {
+            "producer": "fortweb-shared",
+            "payload_profile": "product-shell",
+            "entry_document": "fortweb/app/index.html"
+        }
+        """
+        _ = try writeFile(dir.appendingPathComponent("build-manifest.json"), content: manifest)
+}
+
 // MARK: - MIME Tests
 
 @Suite("AppConfig.MIME")
@@ -65,6 +76,7 @@ struct PathNormalisationTests {
         try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: tmp) }
 
+        try writeValidPayloadManifest(tmp)
         let indexURL: URL = tmp.appendingPathComponent("index.html")
         _ = try writeFile(indexURL, content: "<html></html>")
 
@@ -81,6 +93,7 @@ struct PathNormalisationTests {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: tmp) }
+        try writeValidPayloadManifest(tmp)
         _ = try writeFile(tmp.appendingPathComponent("hello world.js"), content: "// ok")
 
         let handler = makeHandler(dir: tmp)
@@ -96,6 +109,7 @@ struct PathNormalisationTests {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: tmp) }
+        try writeValidPayloadManifest(tmp)
 
         let handler = makeHandler(dir: tmp)
         let url = URL(string: "\(AppConfig.Scheme.name)://local/../etc/passwd")!
@@ -110,6 +124,7 @@ struct PathNormalisationTests {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: tmp) }
+        try writeValidPayloadManifest(tmp)
 
         let handler = makeHandler(dir: tmp)
         let url = URL(string: "\(AppConfig.Scheme.name)://local/./index.html")!
@@ -124,6 +139,7 @@ struct PathNormalisationTests {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: tmp) }
+        try writeValidPayloadManifest(tmp)
 
         let handler = makeHandler(dir: tmp)
         let url = URL(string: "\(AppConfig.Scheme.name)://local/nonexistent.js")!
@@ -139,6 +155,7 @@ struct PathNormalisationTests {
         try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: tmp) }
 
+        try writeValidPayloadManifest(tmp)
         _ = try writeFile(tmp.appendingPathComponent("big.js"), content: "x")
 
         // Set maxBytes to 0 to force the size guard
@@ -155,6 +172,7 @@ struct PathNormalisationTests {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: tmp) }
+        try writeValidPayloadManifest(tmp)
 
         let handler = makeHandler(dir: tmp)
         let url: URL = URL(string: "https://example.com/index.html")!
@@ -169,6 +187,7 @@ struct PathNormalisationTests {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: tmp) }
+        try writeValidPayloadManifest(tmp)
         _ = try writeFile(tmp.appendingPathComponent("index.html"), content: "<html></html>")
 
         let handler = makeHandler(dir: tmp)
@@ -187,6 +206,7 @@ struct PathNormalisationTests {
         try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: tmp) }
 
+        try writeValidPayloadManifest(tmp)
         // Write a small binary file posing as a .wasm module
         let wasmURL: URL = tmp.appendingPathComponent("test.wasm")
         let wasmBytes: Data = Data([0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00])
@@ -209,6 +229,7 @@ struct PathNormalisationTests {
         try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: tmp) }
 
+        try writeValidPayloadManifest(tmp)
         let whlURL: URL = tmp.appendingPathComponent("package.whl")
         try Data([0x50, 0x4B, 0x03, 0x04]).write(to: whlURL)
 
@@ -218,5 +239,29 @@ struct PathNormalisationTests {
 
         #expect(mime == "application/zip")
         #expect(!mime.contains("charset"))
+    }
+
+    @Test("invalid payload manifest throws invalidPayloadManifest")
+    func invalidPayloadManifestThrows() throws {
+        let tmp: URL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        let manifest = """
+        {
+          "producer": "fort-ios-local",
+          "payload_profile": "proof-shell",
+          "entry_document": "index.html"
+        }
+        """
+        _ = try writeFile(tmp.appendingPathComponent("build-manifest.json"), content: manifest)
+        _ = try writeFile(tmp.appendingPathComponent("index.html"), content: "<html></html>")
+
+        let handler = makeHandler(dir: tmp)
+        let url = URL(string: "\(AppConfig.Scheme.name)://local/index.html")!
+        #expect(throws: PayloadSchemeError.invalidPayloadManifest) {
+            _ = try handler.loadResource(for: url)
+        }
     }
 }
