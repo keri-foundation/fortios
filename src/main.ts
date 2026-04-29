@@ -10,6 +10,10 @@ import {
     sendToWorker,
 } from './keri_runtime';
 
+// Deprecated Fort-ios browser-only seam-validation entry point.
+// Keep this file limited to local bridge and worker checks; it is not the
+// authoritative FortWeb-hosted mobile product path and must not regain sync ownership.
+
 // ── DOM helpers ───────────────────────────────────────────────────────────────
 const loadingEl = document.getElementById('loading');
 const loadingStatusEl = document.getElementById('loading-status');
