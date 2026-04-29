@@ -44,6 +44,10 @@ enum AppConfig {
     enum Payload {
         /// Bundle subdirectory containing the Vite `dist/` output (synced by `sync-payload.sh`).
         static let bundleSubdirectory = "WebPayload"
+        /// Wrapper payload provenance expected by the native host.
+        static let requiredProducer = "fortweb-shared"
+        static let requiredProfile = "product-shell"
+        static let requiredEntryDocument = "fortweb/app/index.html"
         /// Maximum size (in bytes) of any single resource served by the scheme handler.
         /// 20 MiB — generous ceiling; Pyodide `.wasm` is ~12 MiB.
         static let maxResourceBytes = 20 * 1024 * 1024

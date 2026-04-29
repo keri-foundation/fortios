@@ -5,6 +5,7 @@ enum PayloadSchemeError: Error {
     case invalidURL
     case disallowedPath
     case missingResource
+    case invalidPayloadManifest
     case resourceTooLarge
 }
 
@@ -14,6 +15,7 @@ final class PayloadSchemeHandler: NSObject, WKURLSchemeHandler {
     /// temporary directory URL in unit tests to avoid requiring a real app bundle.
     private let payloadDirectory: URL?
     private let fileManager: FileManager
+    private var didValidatePayloadManifest = false
 
     init(
         maxBytes: Int = AppConfig.Payload.maxResourceBytes,
@@ -87,6 +89,8 @@ final class PayloadSchemeHandler: NSObject, WKURLSchemeHandler {
             throw PayloadSchemeError.missingResource
         }
 
+        try validatePayloadManifestIfNeeded(baseURL: baseURL)
+
         let fileURL = baseURL.appendingPathComponent(relPath, isDirectory: false)
 
         guard fileManager.fileExists(atPath: fileURL.path) else {
@@ -115,6 +119,33 @@ final class PayloadSchemeHandler: NSObject, WKURLSchemeHandler {
             "[SchemeHandler] served \(relPath) mime=\(mime) bytes=\(data.count)",
             category: AppConfig.Log.schemeHandler)
         return (data, mime, allHeaders)
+    }
+
+    private func validatePayloadManifestIfNeeded(baseURL: URL) throws {
+        if didValidatePayloadManifest {
+            return
+        }
+
+        let manifestURL = baseURL.appendingPathComponent("build-manifest.json", isDirectory: false)
+
+        guard fileManager.fileExists(atPath: manifestURL.path) else {
+            throw PayloadSchemeError.invalidPayloadManifest
+        }
+
+        let data = try Data(contentsOf: manifestURL)
+        guard
+            let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let producer = json["producer"] as? String,
+            let payloadProfile = json["payload_profile"] as? String,
+            let entryDocument = json["entry_document"] as? String,
+            producer == AppConfig.Payload.requiredProducer,
+            payloadProfile == AppConfig.Payload.requiredProfile,
+            entryDocument == AppConfig.Payload.requiredEntryDocument
+        else {
+            throw PayloadSchemeError.invalidPayloadManifest
+        }
+
+        didValidatePayloadManifest = true
     }
 
     private func normalizedRelativePath(urlPath: String) throws -> String {
