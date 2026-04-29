@@ -49,11 +49,11 @@ pyodide: ## Download Pyodide v0.29.1 runtime + crypto wheels (run once per machi
 test-ts: ## Run TypeScript unit tests (Vitest)
 	npm run test
 
-test-e2e: ## Run Playwright E2E tests (excludes @slow Pyodide tests)
+test-e2e: ## Run browser-only Playwright seam-validation tests (excludes @slow Pyodide tests)
 	npm run build
 	npx playwright test --grep-invert "@slow"
 
-test-e2e-slow: ## Run all E2E tests including slow Pyodide roundtrip (120s timeout)
+test-e2e-slow: ## Run all browser-only Playwright seam-validation tests including slow Pyodide roundtrip
 	npm run build
 	npx playwright test
 
