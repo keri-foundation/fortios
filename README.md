@@ -1,26 +1,29 @@
 # Fort-ios
 
-**Fort-ios** is the KERI Foundation iOS wallet app. It consists of two tightly coupled layers:
+**Fort-ios** is the KERI Foundation iOS wallet app. It is the native iOS wrapper around the shared FortWeb wallet payload.
 
 | Layer | What it is | Where it lives |
 |-------|-----------|----------------|
-| **Web payload** | Vite + TypeScript app that boots Pyodide (Python in WASM) and runs KERI crypto | `src/`, `public/`, `vite.config.ts` |
+| **Shared product payload** | FortWeb app, vendor assets, wheels, and runtime config used by the mobile wrappers | [libs/fortweb](../fortweb/README.md) |
 | **iOS wrapper** | UIKit app with a `WKWebView` that serves the web payload via a custom `app://` scheme handler | `xcodeproj/`, `KeriWallet/` |
 
-The two layers communicate through a typed JS↔Swift bridge (`bridge-contract.json`). The web payload is bundled at build time and served entirely from the app bundle — no network fetches at runtime.
+The wrapper and the shared payload communicate through a typed JS↔Swift bridge (`bridge-contract.json`). The shipped app serves bundled assets from the app bundle only. It does not fetch executable code at runtime.
 
-## Current transition note
+## Supported posture
 
-Current operational reality and target architecture differ.
+Fort-ios has one supported payload contract:
 
-- Today, the live local scripts still build from the Fort-ios-local payload surface and stage generated output into `WebPayload/`.
-- Today, wrapper deployment defaults to the FortWeb shared-payload path, while the Fort-ios-local payload remains available only behind `PAYLOAD_SOURCE=fort-ios` as a blocked seam-validation lane.
-- The Fort-ios-local payload is now explicitly treated as a blocked proof-shell producer for wrapper deployment. `sync-payload.sh` and the Android refresh script fail closed if the generated manifest still reports `producer = fort-ios-local` or `payload_profile = proof-shell`, or if proof-shell markers remain in the generated payload.
-- The Fort-ios-local Pyodide seam now assumes the upstream Pyodide 0.29 module contract: the worker is spawned as a module worker and loads `pyodide.mjs`. `build-payload.sh` runs a compatibility check before bundling so classic-worker or ESM-asset drift fails early.
-- The target architecture remains one canonical shared web payload consumed by thin native wrappers.
-- Treat `WebPayload/` as generated output only. Never edit it by hand.
-- Treat the Fort-ios-local `src/` and `index.html` product surface as a transition or proof-shell lane until the shared-payload stabilization work is completed.
-- The active stabilization direction is to move the wrappers onto one canonical shared payload baseline, likely FortWeb, and keep wrapper bundle directories generated and disposable.
+- The shared wallet payload comes from FortWeb.
+- `WebPayload/` is generated wrapper input only. Never edit it by hand.
+- `make sync` stages the FortWeb payload into `WebPayload/` and writes the wrapper manifest consumed by the app.
+- The current acceptance baseline is the on-device wallet flow shown in the mobile validation screenshot: `On-Device Wallet`, `Your Vaults`, and `Available Vaults`.
+- Deprecated local payload surfaces in this repo are scheduled for removal. Do not use `src/`, `index.html`, or any local Fort-ios payload build path as the source of truth for mobile product behavior.
+
+The repo still carries one bounded browser-only validation seam:
+
+- `index.html`, `src/`, `vite.config.ts`, and `playwright/` remain only to validate the JS bridge, worker routing, and other repo-local browser checks.
+- That seam is not a wrapper producer path, not a product-path source of truth, and not a supported mobile payload authority.
+- If a future change no longer needs those browser-only checks, remove the seam rather than expanding it.
 
 ---
 
