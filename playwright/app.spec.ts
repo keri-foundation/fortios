@@ -1,5 +1,10 @@
 import { test, expect } from '@playwright/test';
 
+// These tests cover only the deprecated browser-only seam-validation shell that
+// still lives in this repo for local bridge and worker checks. They are useful
+// as a structural guardrail, but they are not proof that the FortWeb-backed
+// wrapper path is green on iOS.
+
 // ── Structural smoke tests ───────────────────────────────────────────────────
 //
 // These tests verify that the built Vite payload:
@@ -11,7 +16,7 @@ import { test, expect } from '@playwright/test';
 // 20-40s to download and load the runtime, which is too slow for PR-blocking CI.
 // The Pyodide roundtrip is covered by a separate @slow tagged test below.
 
-test.describe('KERI Wallet app shell', () => {
+test.describe('Fort-ios browser-only seam-validation shell', () => {
     test('page title is KERI Wallet', async ({ page }) => {
         await page.goto('/');
         await expect(page).toHaveTitle('KERI Wallet');
