@@ -73,6 +73,10 @@ describe('validate-mobile-payload.mjs', () => {
     it('passes for a FortWeb shared payload manifest without blocked markers', async () => {
         const payloadDir = await makeTempDir();
         await writeJsonFile(path.join(payloadDir, 'build-manifest.json'), makeSharedManifest());
+        await writeTextFile(
+            path.join(payloadDir, 'index.html'),
+            '<script>window.location.replace(\'./fortweb/app/index.html\');</script>'
+        );
         await writeTextFile(path.join(payloadDir, 'fortweb', 'app', 'index.html'), '<h1>KERI Wallet</h1>');
 
         const { stdout } = await runNodeScript(validateMobilePayloadScript, [
@@ -128,6 +132,10 @@ describe('validate-mobile-payload.mjs', () => {
     it('fails when proof-shell markers remain in text payload files', async () => {
         const payloadDir = await makeTempDir();
         await writeJsonFile(path.join(payloadDir, 'build-manifest.json'), makeSharedManifest());
+        await writeTextFile(
+            path.join(payloadDir, 'index.html'),
+            '<script>window.location.replace(\'./fortweb/app/index.html\');</script>'
+        );
         await writeTextFile(path.join(payloadDir, 'fortweb', 'app', 'index.html'), '<p>Profile ID</p>');
 
         const error = await runNodeScriptExpectFailure(validateMobilePayloadScript, [
@@ -139,6 +147,52 @@ describe('validate-mobile-payload.mjs', () => {
 
         expect(error.stdout).toContain('blocked marker: "Profile ID"');
         expect(error.stdout).toContain('[payload-check] result: FAIL');
+    });
+
+    it('fails when ios-webpayload provenance does not match the FortWeb wrapper contract', async () => {
+        const payloadDir = await makeTempDir();
+        await writeJsonFile(
+            path.join(payloadDir, 'build-manifest.json'),
+            makeSharedManifest({
+                producer: 'something-else',
+                payload_profile: 'something-else',
+                entry_document: 'index.html',
+                entry_script: 'src/main.ts',
+            })
+        );
+        await writeTextFile(
+            path.join(payloadDir, 'index.html'),
+            '<script>window.location.replace(\'./fortweb/app/index.html\');</script>'
+        );
+        await writeTextFile(path.join(payloadDir, 'fortweb', 'app', 'index.html'), '<h1>KERI Wallet</h1>');
+
+        const error = await runNodeScriptExpectFailure(validateMobilePayloadScript, [
+            '--payload-dir',
+            payloadDir,
+            '--target',
+            'ios-webpayload',
+        ]);
+
+        expect(error.stdout).toContain('ios-webpayload requires producer fortweb-shared');
+        expect(error.stdout).toContain('ios-webpayload requires payload profile product-shell');
+        expect(error.stdout).toContain('ios-webpayload requires entry document fortweb/app/index.html');
+        expect(error.stdout).toContain('ios-webpayload requires entry script fortweb/app/app/main.js');
+    });
+
+    it('fails when ios-webpayload is missing the FortWeb wrapper layout', async () => {
+        const payloadDir = await makeTempDir();
+        await writeJsonFile(path.join(payloadDir, 'build-manifest.json'), makeSharedManifest());
+        await writeTextFile(path.join(payloadDir, 'index.html'), '<main>wrong root</main>');
+
+        const error = await runNodeScriptExpectFailure(validateMobilePayloadScript, [
+            '--payload-dir',
+            payloadDir,
+            '--target',
+            'ios-webpayload',
+        ]);
+
+        expect(error.stdout).toContain('ios-webpayload wrapper root must redirect to ./fortweb/app/index.html');
+        expect(error.stdout).toContain('ios-webpayload missing FortWeb entry document: fortweb/app/index.html');
     });
 });
 
