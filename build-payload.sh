@@ -1,21 +1,20 @@
 #!/usr/bin/env bash
 # ── build-payload.sh ──────────────────────────────────────────────────────────
 #
-# Platform-agnostic web payload build + Pyodide bundling + manifest validation.
+# Browser-only validation harness build + Pyodide bundling + manifest validation.
 #
-# This script is the reusable core shared by both Fort-ios (sync-payload.sh)
-# and Fort-android (future). It:
+# This script builds the local non-shipped validation surface. The live iOS
+# wrapper payload comes from FortWeb via sync-payload.sh. This script:
 #   1. Validates package-lock.json + Node version
 #   2. Runs npm ci && npm run build:ci
 #   3. Bundles public/pyodide/ → dist/pyodide/
 #   4. Bundles fortweb Python shims → dist/python/
 #   5. Validates dist/build-manifest.json
 #
-# Platform-specific post-processing (e.g. itms-services sanitization for iOS,
-# copying to WebPayload/ or app/src/main/assets/) is handled by the caller.
+# Platform-specific wrapper staging is intentionally handled elsewhere.
 #
-# Usage: source build-payload.sh   (sets PAYLOAD_DIST_DIR for the caller)
-#    or: bash build-payload.sh     (standalone validation)
+# Usage: source build-payload.sh   (sets PAYLOAD_DIST_DIR for callers)
+#    or: bash build-payload.sh     (standalone browser validation build)
 
 set -euo pipefail
 

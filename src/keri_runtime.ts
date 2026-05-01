@@ -108,7 +108,7 @@ export async function initPyodide(): Promise<void> {
     const id = generateId();
     const result = await sendToWorker({ id, type: 'init', origin: window.location.origin });
     if (result.type === 'error') {
-        throw new Error(`Pyodide boot failed: ${result.error}`);
+        throw new Error(`Pyodide initialization failed: ${result.error}`);
     }
 
     // Forward app visibility changes to the worker so it can close/reopen

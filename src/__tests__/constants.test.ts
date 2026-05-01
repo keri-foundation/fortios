@@ -9,7 +9,7 @@ import {
     FORTWEB_REGISTRY_STORE,
     FORTWEB_WALLET_STORAGE_PREFIX,
     PYCHLORIDE_WHEEL,
-    PROOF_CHALLENGE,
+    VALIDATION_MESSAGE,
     fortwebRegistryWorkerStore,
     fortwebVaultStorageName,
     fortwebVaultWorkerStore,
@@ -59,9 +59,9 @@ describe('constants', () => {
         expect(PYCHLORIDE_WHEEL.endsWith('.whl')).toBe(true);
     });
 
-    it('PROOF_CHALLENGE is a non-empty string', () => {
-        expect(typeof PROOF_CHALLENGE).toBe('string');
-        expect(PROOF_CHALLENGE.length).toBeGreaterThan(0);
+    it('VALIDATION_MESSAGE is a non-empty string', () => {
+        expect(typeof VALIDATION_MESSAGE).toBe('string');
+        expect(VALIDATION_MESSAGE.length).toBeGreaterThan(0);
     });
 
     it('FortWeb storage constants match the browser lane naming model', () => {

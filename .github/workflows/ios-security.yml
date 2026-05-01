@@ -1,0 +1,132 @@
+name: iOS Security Checks
+
+permissions:
+  contents: read
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/ios-security.yml'
+      - '.github/workflows/ios-pyodide-slow.yml'
+      - '.tool-versions'
+      - 'Makefile'
+      - 'README.md'
+      - 'bridge-contract.json'
+      - 'build-payload.sh'
+      - 'sync-payload.sh'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig.json'
+      - 'playwright.config.ts'
+      - 'vite.config.ts'
+      - 'vitest.config.ts'
+      - 'src/**'
+      - 'playwright/**'
+      - 'tools/**'
+      - 'KeriWallet/**'
+      - 'KeriWalletTests/**'
+      - 'KeriWalletUITests/**'
+      - 'Config/**'
+      - 'xcodeproj/**'
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/ios-security.yml'
+      - '.github/workflows/ios-pyodide-slow.yml'
+      - '.tool-versions'
+      - 'Makefile'
+      - 'README.md'
+      - 'bridge-contract.json'
+      - 'build-payload.sh'
+      - 'sync-payload.sh'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig.json'
+      - 'playwright.config.ts'
+      - 'vite.config.ts'
+      - 'vitest.config.ts'
+      - 'src/**'
+      - 'playwright/**'
+      - 'tools/**'
+      - 'KeriWallet/**'
+      - 'KeriWalletTests/**'
+      - 'KeriWalletUITests/**'
+      - 'Config/**'
+      - 'xcodeproj/**'
+  workflow_dispatch:
+
+jobs:
+  payload-checks:
+    runs-on: ubuntu-latest
+    env:
+      FORTWEB_DIR: ${{ github.workspace }}/.deps/fortweb
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
+        with:
+          fetch-depth: 0
+
+      - name: Check out FortWeb dependency
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
+        with:
+          repository: keri-foundation/fortweb
+          path: .deps/fortweb
+
+      - name: Set up Node
+        uses: actions/setup-node@60edb5dd545a775178f52524783378180af0d1f8
+        with:
+          node-version: '22.12.0'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify bridge contract output
+        run: make bridge-check
+
+      - name: Run TypeScript checks
+        run: npm run typecheck
+
+      - name: Enforce wrapper payload contract
+        run: make payload-contract
+
+      - name: Run TypeScript unit tests
+        run: make test-ts
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Run fast Playwright smoke tests
+        run: make test-e2e
+
+  swift-tests:
+    runs-on: macos-15
+    env:
+      FORTWEB_DIR: ${{ github.workspace }}/.deps/fortweb
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
+
+      - name: Check out FortWeb dependency
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
+        with:
+          repository: keri-foundation/fortweb
+          path: .deps/fortweb
+
+      - name: Set up Node
+        uses: actions/setup-node@60edb5dd545a775178f52524783378180af0d1f8
+        with:
+          node-version: '22.12.0'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Enforce wrapper payload contract
+        run: make payload-contract
+
+      - name: Run Swift unit and UI tests
+        run: make test-swift

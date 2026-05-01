@@ -7,7 +7,7 @@
     },
     "lifecycleStates": [
         "boot",
-        "pyodide_loading",
+        "runtime_starting",
         "crypto_ready",
         "ready",
         "error"

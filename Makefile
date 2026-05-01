@@ -17,7 +17,7 @@ SIM_APP_PATH  := $(SIM_DERIVED_DATA)/Build/Products/Debug-iphonesimulator/KeriWa
 DEVICE_APP_PATH := $(DEVICE_DERIVED_DATA)/Build/Products/Debug-iphoneos/KeriWallet.app
 DEVICE_REF    ?=
 
-.PHONY: help setup pyodide sync sync-fortweb ios-doctor ios-list-sims ios-list-devices dev-sim run-sim dev-device run-device parity-smoke logs-sim logs-device build test-swift test-ts test-e2e test-e2e-slow test-all bridge-check lint lint-ts open clean archive export upload
+.PHONY: help setup pyodide sync sync-fortweb payload-contract ios-doctor ios-list-sims ios-list-devices dev-sim run-sim dev-device run-device parity-smoke logs-sim logs-device build test-swift test-ts test-e2e test-e2e-slow test-all bridge-check lint lint-ts open clean archive export upload
 
 help: ## Show available make targets
 	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | \
@@ -39,23 +39,27 @@ test-e2e: ## Run Playwright E2E tests (excludes @slow Pyodide tests)
 	npx playwright test --grep-invert "@slow"
 
 test-e2e-slow: ## Run all E2E tests including slow Pyodide roundtrip (120s timeout)
-	bash build-payload.sh
+	npm run build
 	npx playwright test
 
 bridge-check: ## Verify bridge-contract.ts, BridgeContract.swift, and BridgeContract.kt are up to date
 	npm run bridge:check
-	git diff --exit-code src/bridge-contract.ts xcodeproj/KeriWallet/KeriWallet/BridgeContract.swift generated/BridgeContract.kt
 
 lint-ts: ## Run TypeScript type check (tsc --noEmit)
 	npm run typecheck
 
 # ── iOS-only targets ──────────────────────────────────────────────────────────
 
-sync: ## Build and sync the selected payload source (default: FortWeb convergence path)
+sync: ## Stage the shipped FortWeb payload into WebPayload/
 	PAYLOAD_SOURCE=$(PAYLOAD_SOURCE) FORTWEB_DIR=$(FORTWEB_DIR) ./sync-payload.sh
 
-sync-fortweb: ## Sync the FortWeb payload into WebPayload/ for the mainline convergence path
+sync-fortweb: ## Explicit alias for the FortWeb wrapper staging path
 	PAYLOAD_SOURCE=fortweb FORTWEB_DIR=$(FORTWEB_DIR) ./sync-payload.sh
+
+payload-contract: ## Fail closed on blocked payload regressions and validate staged WebPayload
+	node tools/assert-no-proof-demo-shell.mjs
+	PAYLOAD_SOURCE=fortweb FORTWEB_DIR=$(FORTWEB_DIR) ./sync-payload.sh
+	node tools/validate-mobile-payload.mjs --payload-dir WebPayload --target ios-webpayload
 
 ios-list-sims: ## List available iOS Simulator destinations
 	xcrun simctl list devices available

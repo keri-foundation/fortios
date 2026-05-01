@@ -1,13 +1,13 @@
 import { test, expect } from '@playwright/test';
 
 // These tests validate only the local seam-validation payload and bridge seam.
-// They should not be treated as end-to-end proof that the FortWeb-hosted
+// They should not be treated as end-to-end confirmation that the FortWeb-hosted
 // product path is green on iOS.
 
 // ── Structural smoke tests ───────────────────────────────────────────────────
 //
 // These tests verify that the built Vite payload:
-//   1. Loads without critical errors
+//   1. Starts without critical errors
 //   2. Has the expected DOM structure
 //   3. Exposes the Swift ↔ JS bridge API surface correctly
 //
@@ -15,7 +15,7 @@ import { test, expect } from '@playwright/test';
 // 20-40s to download and load the runtime, which is too slow for PR-blocking CI.
 // The Pyodide roundtrip is covered by a separate @slow tagged test below.
 
-test.describe('KERI Wallet seam-validation shell', () => {
+test.describe('KERI Wallet validation harness', () => {
     test('page title is KERI Wallet', async ({ page }) => {
         await page.goto('/');
         await expect(page).toHaveTitle('KERI Wallet');
@@ -76,10 +76,10 @@ test.describe('Bridge contract', () => {
         // The bundle should expose the BRIDGE_HANDLER_NAME constant indirectly
         // via the registered message handler name. We verify the page loads
         // without ReferenceErrors on bridge-contract imports.
-        const loadErrors = await page.evaluate(() => {
-            return (window as unknown as { __bridgeLoadError?: string }).__bridgeLoadError ?? null;
+        const initErrors = await page.evaluate(() => {
+            return (window as unknown as { __bridgeInitError?: string }).__bridgeInitError ?? null;
         });
-        expect(loadErrors).toBeNull();
+        expect(initErrors).toBeNull();
     });
 });
 
@@ -129,8 +129,8 @@ test.describe('@slow Pyodide roundtrip', () => {
             () => (window as unknown as { __workerMessages: unknown[] }).__workerMessages,
         );
 
-        const workerLogText = await page.locator('#output').innerText();
-        expect(workerLogText).not.toContain('Pyodide boot failed');
+        const workerLogText = (await page.locator('#output').innerText()).toLowerCase();
+        expect(workerLogText).not.toContain('initialization failed');
         expect(messages.some((m) => (m as { type: string }).type === 'lifecycle')).toBe(true);
     });
 });

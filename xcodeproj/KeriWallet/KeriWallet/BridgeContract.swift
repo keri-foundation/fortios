@@ -24,14 +24,14 @@ enum BridgeContract {
     // MARK: - Lifecycle States
 
     static let lifecycleBoot = "boot"
-    static let lifecyclePyodideLoading = "pyodide_loading"
+    static let lifecycleRuntimeStarting = "runtime_starting"
     static let lifecycleCryptoReady = "crypto_ready"
     static let lifecycleReady = "ready"
     static let lifecycleError = "error"
 
     static let allLifecycleStates: [String] = [
         lifecycleBoot,
-        lifecyclePyodideLoading,
+        lifecycleRuntimeStarting,
         lifecycleCryptoReady,
         lifecycleReady,
         lifecycleError,

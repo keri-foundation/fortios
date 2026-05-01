@@ -2,7 +2,7 @@ import {
     FORTWEB_KF_STATE_SUBDB,
     FORTWEB_REGISTRY_STORE,
     LOADING_FADE_MS,
-    PROOF_CHALLENGE,
+    VALIDATION_MESSAGE,
     fortwebRegistryWorkerStore,
     fortwebVaultStorageName,
     fortwebVaultWorkerStore,
@@ -18,10 +18,9 @@ import {
     sendToWorker,
 } from './keri_runtime';
 
-// Legacy proof-harness entry point. This file is still useful for worker-seam
-// validation, but it is not the authoritative FortWeb-hosted product path.
+// Browser-only validation harness. The shipped app loads the staged FortWeb
+// product-shell payload through WebPayload/.
 
-// ── DOM helpers ───────────────────────────────────────────────────────────────
 const loadingEl = document.getElementById('loading');
 const loadingStatusEl = document.getElementById('loading-status');
 const appEl = document.getElementById('app');
@@ -29,22 +28,12 @@ const statusEl = document.getElementById('status');
 const statusDotEl = document.getElementById('status-dot');
 const outputEl = document.getElementById('output');
 
-// Profile form elements for the local seam-validation lane.
-const profileIdEl = document.getElementById('profile-id') as HTMLInputElement | null;
-const profileNameEl = document.getElementById('profile-name') as HTMLInputElement | null;
-const profileNoteEl = document.getElementById('profile-note') as HTMLTextAreaElement | null;
-const btnSaveEl = document.getElementById('btn-save');
-const btnLoadEl = document.getElementById('btn-load');
-const dbStatusEl = document.getElementById('db-status');
-const recordJsonEl = document.getElementById('record-json');
-
-function setLoadingStatus(text: string): void {
+function setStartupStatus(text: string): void {
     if (loadingStatusEl) loadingStatusEl.textContent = text;
 }
 
 function showApp(): void {
     if (loadingEl) loadingEl.classList.add('hidden');
-    // Wait for fade-out transition before showing app
     setTimeout(() => {
         if (loadingEl) loadingEl.style.display = 'none';
         if (appEl) appEl.classList.add('visible');
@@ -62,86 +51,6 @@ function setStatus(text: string, state?: 'done' | 'error'): void {
 function log(line: string): void {
     if (!outputEl) return;
     outputEl.textContent = `${outputEl.textContent ?? ''}${line}\n`;
-}
-
-// ── Profile persistence (IndexedDB via worker) ───────────────────────────────
-
-function setDbStatus(text: string, ok = true): void {
-    if (dbStatusEl) {
-        dbStatusEl.textContent = `${ok ? '●' : '○'} ${text}`;
-        dbStatusEl.style.color = ok ? 'var(--status-done)' : 'var(--status-error)';
-    }
-}
-
-async function saveProfile(): Promise<void> {
-    const id = profileIdEl?.value.trim();
-    const name = profileNameEl?.value.trim();
-    if (!id) { setDbStatus('Profile ID is required.', false); return; }
-    if (!name) { setDbStatus('Name is required.', false); return; }
-
-    const record = {
-        id,
-        name,
-        note: profileNoteEl?.value ?? '',
-        updated_at: isoNow(),
-    };
-
-    const cmdId = generateId();
-    const result = await sendToWorker({
-        id: cmdId,
-        type: 'db_put',
-        store: 'profile',
-        key: id,
-        value: JSON.stringify(record),
-    });
-
-    if (result.type === 'db_put_result' && result.ok) {
-        setDbStatus(`Saved profile '${id}'.`);
-        if (recordJsonEl) recordJsonEl.textContent = JSON.stringify(record, null, 2);
-        log(`saved profile id=${id}`);
-    } else {
-        setDbStatus(`Save failed: ${result.type === 'error' ? result.error : 'unknown'}`, false);
-    }
-}
-
-async function loadProfile(): Promise<void> {
-    const id = profileIdEl?.value.trim();
-    if (!id) { setDbStatus('Enter a Profile ID to load.', false); return; }
-
-    const cmdId = generateId();
-    const result = await sendToWorker({
-        id: cmdId,
-        type: 'db_get',
-        store: 'profile',
-        key: id,
-    });
-
-    if (result.type === 'db_get_result') {
-        if (result.value === null) {
-            setDbStatus(`No profile found for '${id}'.`, false);
-            if (recordJsonEl) recordJsonEl.textContent = 'No record loaded.';
-        } else {
-            try {
-                const record = JSON.parse(result.value);
-                if (profileNameEl) profileNameEl.value = record.name ?? '';
-                if (profileNoteEl) profileNoteEl.value = record.note ?? '';
-                if (recordJsonEl) recordJsonEl.textContent = JSON.stringify(record, null, 2);
-                setDbStatus(`Loaded profile '${id}'.`);
-                log(`loaded profile id=${id}`);
-            } catch {
-                setDbStatus('Stored data is corrupt (invalid JSON).', false);
-                if (recordJsonEl) recordJsonEl.textContent = result.value;
-            }
-        }
-    } else {
-        setDbStatus(`Load failed: ${result.type === 'error' ? result.error : 'unknown'}`, false);
-    }
-}
-
-function installProfileHandlers(): void {
-    btnSaveEl?.addEventListener('click', () => { void saveProfile(); });
-    btnLoadEl?.addEventListener('click', () => { void loadProfile(); });
-    setDbStatus('Ready. Enter profile id and name, then Save or Load.');
 }
 
 async function putWorkerValue(store: string, key: string, value: string): Promise<void> {
@@ -174,16 +83,14 @@ async function deleteWorkerValue(store: string, key: string): Promise<void> {
     }
 }
 
-// Validate one real FortWeb storage slice on the live worker seam: registry entry
-// plus per-vault key-state data using the same naming model FortWeb uses.
-async function runFortwebStorageProof(): Promise<void> {
-    const vaultId = 'proof-alpha';
+async function runFortwebStorageCheck(): Promise<void> {
+    const vaultId = 'validation-alpha';
     const registryStore = fortwebRegistryWorkerStore();
     const vaultStateStore = fortwebVaultWorkerStore(vaultId);
     const createdAt = isoNow();
     const registryValue = JSON.stringify({
         id: vaultId,
-        alias: 'Proof Alpha',
+        alias: 'Validation Alpha',
         storageName: fortwebVaultStorageName(vaultId),
         runtimeMode: 'pyodide-worker',
         createdAt,
@@ -194,7 +101,7 @@ async function runFortwebStorageProof(): Promise<void> {
         updatedAt: createdAt,
     });
 
-    log(`fortweb storage seam check: registry=${registryStore} vaultState=${vaultStateStore}`);
+    log(`fortweb storage check: registry=${registryStore} vaultState=${vaultStateStore}`);
 
     try {
         await putWorkerValue(registryStore, vaultId, registryValue);
@@ -203,68 +110,66 @@ async function runFortwebStorageProof(): Promise<void> {
         const registryEntries = await listWorkerValues(registryStore, '');
         const registryEntry = registryEntries.find((entry) => entry.key === vaultId);
         if (!registryEntry || registryEntry.value !== registryValue) {
-            throw new Error(`FortWeb registry seam check failed for ${FORTWEB_REGISTRY_STORE}${vaultId}`);
+            throw new Error(`FortWeb registry check failed for ${FORTWEB_REGISTRY_STORE}${vaultId}`);
         }
 
         const loadedState = await getWorkerValue(vaultStateStore, 'state');
         if (loadedState !== stateValue) {
-            throw new Error(`FortWeb vault state seam check failed for ${FORTWEB_KF_STATE_SUBDB}state`);
+            throw new Error(`FortWeb vault state check failed for ${FORTWEB_KF_STATE_SUBDB}state`);
         }
 
-        log(`fortweb storage seam check: registry + ${FORTWEB_KF_STATE_SUBDB} state round-trip ok`);
+        log(`fortweb storage check: registry + ${FORTWEB_KF_STATE_SUBDB} state round-trip ok`);
     } finally {
         await deleteWorkerValue(vaultStateStore, 'state');
         await deleteWorkerValue(registryStore, vaultId);
-        log('fortweb storage seam check: cleaned validation records');
+        log('fortweb storage check: cleaned validation records');
     }
 }
 
-// ── Boot-time seam validation ────────────────────────────────────────────────
-async function runProof(): Promise<void> {
-    const probe = PROOF_CHALLENGE;
+async function runCryptoCheck(): Promise<void> {
+    const message = VALIDATION_MESSAGE;
 
-    const hashId = generateId();
-    const hashRes = await sendToWorker({ id: hashId, type: 'blake3_hash', data: probe });
+    const hashRes = await sendToWorker({ id: generateId(), type: 'blake3_hash', data: message });
     log(`blake3: ${hashRes.type === 'blake3_result' ? hashRes.hex : `(error: ${hashRes.type === 'error' ? hashRes.error : hashRes.type})`}`);
 
-    const signId = generateId();
-    const signRes = await sendToWorker({ id: signId, type: 'sign', message: probe });
-    if (signRes.type !== 'sign_result') { log(`sign failed: ${signRes.type === 'error' ? signRes.error : signRes.type}`); return; }
-    const { signature, publicKey } = signRes;
-    log(`signed ok, pk: ${publicKey.slice(0, 16)}…`);
+    const signRes = await sendToWorker({ id: generateId(), type: 'sign', message });
+    if (signRes.type !== 'sign_result') {
+        log(`sign failed: ${signRes.type === 'error' ? signRes.error : signRes.type}`);
+        return;
+    }
 
-    const verifyId = generateId();
-    const verifyRes = await sendToWorker({ id: verifyId, type: 'verify', message: probe, signature, publicKey });
+    const { signature, publicKey } = signRes;
+    log(`signed ok, pk: ${publicKey.slice(0, 16)}...`);
+
+    const verifyRes = await sendToWorker({ id: generateId(), type: 'verify', message, signature, publicKey });
     log(`pychloride sign+verify: ${verifyRes.type === 'verify_result' ? verifyRes.valid : false}`);
 }
 
-// ── main ──────────────────────────────────────────────────────────────────────
 async function main(): Promise<void> {
     installGlobalErrorHooks();
     installNativeCommandHandler();
     onWorkerLog(log);
     postToBridge({ type: 'lifecycle', timestamp: isoNow(), message: 'boot' });
 
-    setLoadingStatus('Loading Pyodide…');
+    setStartupStatus('Starting Pyodide runtime...');
     await initPyodide();
 
-    setLoadingStatus('Running seam validation…');
+    setStartupStatus('Running validation checks...');
     showApp();
-    installProfileHandlers();
 
-    setStatus('running crypto seam check');
-    await runProof();
+    setStatus('running crypto check');
+    await runCryptoCheck();
 
-    setStatus('running fortweb storage seam check');
-    await runFortwebStorageProof();
+    setStatus('running FortWeb storage check');
+    await runFortwebStorageCheck();
 
-    setStatus('seam validation ready', 'done');
+    setStatus('validation ready', 'done');
     postToBridge({ type: 'lifecycle', timestamp: isoNow(), message: 'done' });
 }
 
-main().catch((e: unknown) => {
-    const err = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
-    setStatus(err, 'error');
+main().catch((error: unknown) => {
+    const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+    setStatus(message, 'error');
     showApp();
-    log(err);
+    log(message);
 });

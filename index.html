@@ -1,77 +1,51 @@
 <!doctype html>
 <html lang="en">
-
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="color-scheme" content="dark light" />
   <title>KERI Wallet</title>
-  <!-- Legacy proof-shell document. Keep only as a bounded seam-validation surface;
-       do not treat it as the authoritative FortWeb-hosted product UI. -->
   <style>
-    /* ─── Brand tokens (ADR-027) ────────────────────────────────────── */
     :root {
-      /* Brand palette */
       --keri-green: #61783e;
-      --keri-gold: #986c32;
-      --keri-black: #000000;
-
-      /* Backgrounds */
       --bg-dark: #0d0d0f;
       --bg-light: #f5f5f7;
-
-      /* Text */
       --text-dark: #e8e8e8;
       --text-light: #1d1d1f;
       --text-muted-dark: #a0a0a8;
       --text-muted-light: #6e6e73;
-
-      /* Status indicators */
       --status-pending: #ff9f0a;
       --status-error: #ff453a;
       --status-done: var(--keri-green);
-
-      /* Spacing scale */
-      --space-xs: 8px;
       --space-sm: 12px;
       --space-md: 16px;
-      --space-lg: 20px;
-      --space-xl: 24px;
-
-      /* Timing — LOADING_FADE_MS in constants.ts must match --fade-duration */
+      --space-lg: 24px;
       --fade-duration: 0.4s;
     }
 
-    /* ─── Reset ─────────────────────────────────────────────────────── */
-    *,
-    *::before,
-    *::after {
+    * {
       box-sizing: border-box;
       margin: 0;
       padding: 0;
     }
 
     html {
-      -webkit-text-size-adjust: 100%;
-      text-size-adjust: 100%;
       color-scheme: dark light;
       -webkit-font-smoothing: antialiased;
-      overscroll-behavior: none;
       height: 100dvh;
     }
 
-    /* ─── Background — literal hex, not a var() — prevents single-frame white flash ── */
     body {
-      background-color: #0d0d0f;
+      background-color: var(--bg-dark);
       color: var(--text-dark);
       min-height: 100dvh;
       font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
-      font-size: var(--space-md);
       line-height: 1.5;
-      padding-top: max(var(--space-md), env(safe-area-inset-top));
-      padding-bottom: max(var(--space-md), env(safe-area-inset-bottom));
-      padding-left: max(var(--space-md), env(safe-area-inset-left));
-      padding-right: max(var(--space-md), env(safe-area-inset-right));
+      padding:
+        max(var(--space-md), env(safe-area-inset-top))
+        max(var(--space-md), env(safe-area-inset-right))
+        max(var(--space-md), env(safe-area-inset-bottom))
+        max(var(--space-md), env(safe-area-inset-left));
     }
 
     @media (prefers-color-scheme: light) {
@@ -81,22 +55,13 @@
       }
     }
 
-    /* ─── Tap behaviour ─────────────────────────────────────────────── */
-    a,
-    button,
-    [role="button"] {
-      -webkit-tap-highlight-color: transparent;
-      touch-action: manipulation;
-    }
-
-    /* ─── Loading screen (visible during seam validation boot) ──────── */
     #loading {
       display: flex;
+      min-height: 80dvh;
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      min-height: 80dvh;
-      gap: var(--space-xl);
+      gap: var(--space-lg);
       transition: opacity var(--fade-duration) ease-out;
     }
 
@@ -111,43 +76,35 @@
       animation: pulse 2s ease-in-out infinite;
     }
 
-    #loading-status {
-      font-size: 14px;
-      font-weight: 500;
+    #loading-status,
+    #status,
+    .copy {
       color: var(--text-muted-dark);
-      letter-spacing: 0.5px;
     }
 
     @media (prefers-color-scheme: light) {
-      #loading-status {
+      #loading-status,
+      #status,
+      .copy {
         color: var(--text-muted-light);
       }
     }
 
     @keyframes pulse {
-
-      0%,
-      100% {
-        opacity: 1;
-        transform: scale(1);
-      }
-
-      50% {
-        opacity: 0.6;
-        transform: scale(0.96);
-      }
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.6; transform: scale(0.96); }
     }
 
-    /* ─── Main app (hidden until the seam-validation lane is ready) ─── */
     #app {
       display: none;
+      max-width: 720px;
+      margin: 0 auto;
     }
 
     #app.visible {
       display: block;
     }
 
-    /* ─── Header ─────────────────────────────────────────────────────── */
     .header {
       display: flex;
       align-items: center;
@@ -169,24 +126,21 @@
     }
 
     .header h1 {
+      color: var(--keri-green);
       font-size: 20px;
       font-weight: 700;
-      line-height: 1.2;
-      letter-spacing: -0.3px;
-      color: var(--keri-green);
     }
 
-    /* ─── Status badge ───────────────────────────────────────────────── */
     .status-row {
       display: flex;
       align-items: center;
-      gap: var(--space-xs);
-      margin-bottom: var(--space-sm);
+      gap: 8px;
+      margin-bottom: var(--space-md);
     }
 
     .status-dot {
-      width: var(--space-xs);
-      height: var(--space-xs);
+      width: 8px;
+      height: 8px;
       border-radius: 50%;
       background-color: var(--status-pending);
       flex-shrink: 0;
@@ -200,223 +154,55 @@
       background-color: var(--status-error);
     }
 
-    #status {
-      font-size: 13px;
-      font-weight: 500;
-      color: var(--text-muted-dark);
+    .copy {
+      margin-bottom: var(--space-lg);
+      font-size: 14px;
     }
 
-    @media (prefers-color-scheme: light) {
-      #status {
-        color: var(--text-muted-light);
-      }
-    }
-
-    /* ─── Output pane ────────────────────────────────────────────────── */
     #output {
-      margin-top: var(--space-sm);
-      padding: var(--space-sm);
-      background-color: rgba(255, 255, 255, 0.05);
+      padding: var(--space-md);
       border-radius: 10px;
       border: 1px solid rgba(255, 255, 255, 0.06);
-      font-family: ui-monospace, 'SF Mono', 'Fira Code', monospace;
+      background-color: rgba(255, 255, 255, 0.05);
+      font-family: ui-monospace, "SF Mono", "Fira Code", monospace;
       font-size: 12px;
       line-height: 1.6;
       white-space: pre-wrap;
       word-break: break-word;
+      min-height: 180px;
+      max-height: 40dvh;
       overflow-y: auto;
-      max-height: 30vh;
-      -webkit-overflow-scrolling: touch;
-      contain: layout paint;
     }
 
     @media (prefers-color-scheme: light) {
       #output {
-        background-color: rgba(0, 0, 0, 0.03);
         border-color: rgba(0, 0, 0, 0.06);
-      }
-    }
-
-    /* ─── Profile form (IndexedDB seam validation) ───────────────────── */
-    .profile-section {
-      margin-top: var(--space-lg);
-      padding-top: var(--space-md);
-      border-top: 1px solid rgba(255, 255, 255, 0.08);
-    }
-
-    @media (prefers-color-scheme: light) {
-      .profile-section {
-        border-top-color: rgba(0, 0, 0, 0.08);
-      }
-    }
-
-    .field-group {
-      margin-bottom: var(--space-sm);
-    }
-
-    .field-group label {
-      display: block;
-      font-size: 11px;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.8px;
-      color: var(--text-muted-dark);
-      margin-bottom: 4px;
-    }
-
-    @media (prefers-color-scheme: light) {
-      .field-group label {
-        color: var(--text-muted-light);
-      }
-    }
-
-    .field-group input,
-    .field-group textarea {
-      width: 100%;
-      padding: var(--space-xs) var(--space-sm);
-      border-radius: 8px;
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      background-color: rgba(255, 255, 255, 0.06);
-      color: var(--text-dark);
-      font-family: inherit;
-      font-size: 15px;
-      outline: none;
-      transition: border-color 0.2s;
-    }
-
-    .field-group input:focus,
-    .field-group textarea:focus {
-      border-color: var(--keri-gold);
-    }
-
-    @media (prefers-color-scheme: light) {
-
-      .field-group input,
-      .field-group textarea {
-        border-color: rgba(0, 0, 0, 0.12);
         background-color: rgba(0, 0, 0, 0.03);
-        color: var(--text-light);
-      }
-    }
-
-    .field-group textarea {
-      resize: vertical;
-      min-height: 60px;
-    }
-
-    .btn-row {
-      display: flex;
-      gap: var(--space-sm);
-      align-items: center;
-      margin-top: var(--space-md);
-    }
-
-    .btn {
-      padding: var(--space-xs) var(--space-lg);
-      border-radius: 8px;
-      border: 1px solid rgba(255, 255, 255, 0.15);
-      background-color: rgba(255, 255, 255, 0.08);
-      color: var(--text-dark);
-      font-size: 14px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: background-color 0.15s;
-    }
-
-    .btn:active {
-      background-color: rgba(255, 255, 255, 0.15);
-    }
-
-    @media (prefers-color-scheme: light) {
-      .btn {
-        border-color: rgba(0, 0, 0, 0.15);
-        background-color: rgba(0, 0, 0, 0.04);
-        color: var(--text-light);
-      }
-
-      .btn:active {
-        background-color: rgba(0, 0, 0, 0.08);
-      }
-    }
-
-    #db-status {
-      font-size: 13px;
-      color: var(--text-muted-dark);
-    }
-
-    @media (prefers-color-scheme: light) {
-      #db-status {
-        color: var(--text-muted-light);
-      }
-    }
-
-    /* ─── Record JSON display ────────────────────────────────────────── */
-    #record-json {
-      margin-top: var(--space-sm);
-      padding: var(--space-sm);
-      background-color: rgba(255, 255, 255, 0.05);
-      border-radius: 10px;
-      border: 1px solid rgba(255, 255, 255, 0.06);
-      font-family: ui-monospace, 'SF Mono', 'Fira Code', monospace;
-      font-size: 12px;
-      line-height: 1.6;
-      white-space: pre-wrap;
-      word-break: break-word;
-      min-height: 80px;
-      color: var(--text-muted-dark);
-    }
-
-    @media (prefers-color-scheme: light) {
-      #record-json {
-        background-color: rgba(0, 0, 0, 0.03);
-        border-color: rgba(0, 0, 0, 0.06);
-        color: var(--text-muted-light);
       }
     }
   </style>
   <script type="module" src="/src/main.ts"></script>
 </head>
-
 <body>
-  <!-- Loading screen: SymbolLogo with pulse animation -->
   <div id="loading">
     <img src="./SymbolLogo.svg" alt="KERI" />
-    <span id="loading-status">Initializing…</span>
+    <span id="loading-status">Initializing validation runtime…</span>
   </div>
 
-  <!-- Main app: revealed after the local seam-validation lane boots -->
   <div id="app">
     <div class="header">
       <img src="./FullLogo.svg" alt="KERI Foundation" />
+      <h1>Validation Harness</h1>
     </div>
     <div class="status-row">
       <span class="status-dot" id="status-dot"></span>
-      <span id="status">booting seam validation</span>
+      <span id="status">booting validation checks</span>
     </div>
+    <p class="copy">
+      This browser-only surface validates the local bridge and worker runtime. The shipped iOS
+      wrapper serves the FortWeb product-shell payload staged into <code>WebPayload/</code>.
+    </p>
     <pre id="output"></pre>
-
-    <!-- Profile persistence seam check (IndexedDB via Pyodide worker) -->
-    <div class="profile-section">
-      <div class="field-group">
-        <label for="profile-id">Profile ID</label>
-        <input type="text" id="profile-id" placeholder="e.g. jay-1" autocomplete="off" autocorrect="off" />
-      </div>
-      <div class="field-group">
-        <label for="profile-name">Name</label>
-        <input type="text" id="profile-name" placeholder="Display name" autocomplete="off" autocorrect="off" />
-      </div>
-      <div class="field-group">
-        <label for="profile-note">Note</label>
-        <textarea id="profile-note" placeholder="Optional note..." rows="3"></textarea>
-      </div>
-      <div class="btn-row">
-        <button class="btn" id="btn-save">Save</button>
-        <button class="btn" id="btn-load">Load</button>
-        <span id="db-status"></span>
-      </div>
-      <pre id="record-json">No record loaded.</pre>
-    </div>
   </div>
 </body>
-
 </html>

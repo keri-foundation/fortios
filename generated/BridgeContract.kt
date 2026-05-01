@@ -26,14 +26,14 @@ object BridgeContract {
     // ── Lifecycle States ──────────────────────────────────────────────────
 
     const val LIFECYCLE_BOOT = "boot"
-    const val LIFECYCLE_PYODIDE_LOADING = "pyodide_loading"
+    const val LIFECYCLE_RUNTIME_STARTING = "runtime_starting"
     const val LIFECYCLE_CRYPTO_READY = "crypto_ready"
     const val LIFECYCLE_READY = "ready"
     const val LIFECYCLE_ERROR = "error"
 
     val ALL_LIFECYCLE_STATES = listOf(
         LIFECYCLE_BOOT,
-        LIFECYCLE_PYODIDE_LOADING,
+        LIFECYCLE_RUNTIME_STARTING,
         LIFECYCLE_CRYPTO_READY,
         LIFECYCLE_READY,
         LIFECYCLE_ERROR,

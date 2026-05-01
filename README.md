@@ -1,22 +1,21 @@
 # Fort-ios
 
-**Fort-ios** is the KERI Foundation iOS wallet host repo. It currently contains a thin native wrapper plus two web-payload lanes that share the same host workflow:
+**Fort-ios** is the KERI Foundation iOS wallet host repo. It contains a thin native wrapper plus a browser-only validation harness used for local bridge and worker checks:
 
 | Layer | What it is | Where it lives |
 |-------|-----------|----------------|
-| **Local proof payload** | Legacy Vite + TypeScript proof harness used to validate the worker seam, Pyodide boot, and storage behavior | `src/`, `public/`, `vite.config.ts` |
+| **Browser validation harness** | Local Vite + TypeScript surface used to validate the bridge, Pyodide runtime, and FortWeb storage compatibility | `src/`, `public/`, `vite.config.ts` |
 | **iOS wrapper** | UIKit app with a `WKWebView` that serves the web payload via a custom `app://` scheme handler | `xcodeproj/`, `KeriWallet/` |
 
 The two layers communicate through a typed JS↔Swift bridge (`bridge-contract.json`). The web payload is bundled at build time and served entirely from the app bundle — no network fetches at runtime.
 
-The repo currently supports two payload sources through the same iOS host workflow:
+The wrapper ships a single payload source:
 
 | Payload source | Status | How to stage it |
 |-------|--------|----------------|
-| `fortweb` | Mainline convergence lane for the thin-wrapper target; now the default host path | `make sync` or `make sync-fortweb` |
-| `fort-ios` | Legacy proof-harness lane kept for seam validation and reference | `PAYLOAD_SOURCE=fort-ios make sync` |
+| `fortweb` | Required wrapper payload posture for upstream Fort-ios | `make sync` or `make sync-fortweb` |
 
-For current thin-wrapper convergence work, treat `fortweb` as the intended hosted product payload. The `fort-ios` payload remains useful for local bridge and worker validation, but it is not the product-path source of truth.
+The browser validation harness is non-shipped. The app bundle must stage and serve the FortWeb product-shell payload from `WebPayload/`.
 
 ---
 
@@ -85,10 +84,10 @@ After these three steps the project is ready to build.
 # 1. Confirm Xcode, Simulator, and payload-source readiness
 make ios-doctor
 
-# 2. Stage the payload you want to host in iOS
+# 2. Stage the shipped wrapper payload and verify the payload contract
 make sync                       # default: FortWeb convergence path
 make sync-fortweb              # explicit alias for the same FortWeb path
-PAYLOAD_SOURCE=fort-ios make sync  # legacy proof-harness path
+make payload-contract
 
 # 3. Run the fast local checks
 make lint                      # SwiftLint (Swift sources)
@@ -103,13 +102,11 @@ make run-sim
 make dev-device
 make run-device DEVICE_REF=<udid-or-name>
 
-# 6. Compare both lanes when needed
+# 6. Optional wrapper/device parity checks
 make parity-smoke DEVICE_REF=<udid-or-name>
 make logs-sim
 make logs-device DEVICE_REF=<udid-or-name>
 ```
-
-The default wrapper targets now stage FortWeb automatically. Use `PAYLOAD_SOURCE=fort-ios` only when you intentionally want the legacy proof harness, for example `PAYLOAD_SOURCE=fort-ios make dev-sim`.
 
 For conference acceptance and simulator/device parity runs, use [CONFERENCE-IOS-VALIDATION-CHECKLIST.md](libs/Fort-ios/CONFERENCE-IOS-VALIDATION-CHECKLIST.md).
 
@@ -124,8 +121,9 @@ Run `make help` at any time to list all available targets.
 | `make help` | List all targets with descriptions |
 | `make setup` | Install Node dependencies (`npm ci`) |
 | `make pyodide` | Download Pyodide v0.29.1 runtime + crypto wheels into `public/pyodide/` |
-| `make sync` | Sync the selected payload source into `WebPayload/` (`PAYLOAD_SOURCE=fortweb` by default for the mainline thin-wrapper convergence path) |
-| `make sync-fortweb` | Stage the FortWeb payload into `WebPayload/` explicitly; equivalent to the default sync path |
+| `make sync` | Stage the FortWeb product-shell payload into `WebPayload/` |
+| `make sync-fortweb` | Explicit alias for the FortWeb wrapper staging path |
+| `make payload-contract` | Scan active sources for blocked legacy payload posture and validate the staged `WebPayload/` manifest |
 | `make ios-list-sims` | List available iOS Simulator destinations |
 | `make ios-list-devices` | List CoreDevice-visible physical devices |
 | `make ios-doctor` | Verify Xcode, simulator, and payload-source readiness |
@@ -142,7 +140,7 @@ Run `make help` at any time to list all available targets.
 | `make lint-ts` | Run `tsc --noEmit` to type-check TypeScript without emitting |
 | `make test-swift` | Run Swift unit + UI tests on iOS Simulator via `xcodebuild test` |
 | `make test-ts` | Run Vitest unit tests (`vitest run`) |
-| `make test-e2e` | Run Playwright structural tests (excludes `@slow` Pyodide boot tests) |
+| `make test-e2e` | Run Playwright structural tests (excludes `@slow` Pyodide runtime tests) |
 | `make test-e2e-slow` | Run all Playwright tests including the 120 s Pyodide roundtrip |
 | `make test-all` | Run `test-swift` + `test-ts` + `test-e2e` in sequence |
 | `make bridge-check` | Verify `bridge-contract.ts` and `BridgeContract.swift` match `bridge-contract.json` |
@@ -157,8 +155,8 @@ These are invoked internally by `make` targets. Use `make` for day-to-day work.
 | Script | Command | Notes |
 |--------|---------|-------|
 | `npm run dev` | `vite` | Local dev server. iOS wrapper always loads bundled assets — not used in app. |
-| `npm run build` | `vite build` (+ pre-build contract generation) | Development build. Skips manifest. |
-| `npm run build:ci` | contract gen → `vite build` → manifest gen | **Canonical production build.** Writes `dist/build-manifest.json`. |
+| `npm run build` | `vite build` (+ pre-build contract generation) | Browser validation harness build. |
+| `npm run build:ci` | contract gen → `vite build` → manifest gen | Deterministic browser validation harness build. Writes `dist/build-manifest.json`. |
 | `npm run bridge:check` | `gen-bridge-contract.mjs --check` | Fails if generated contract differs from committed `bridge-contract.json`. |
 | `npm run typecheck` | `tsc --noEmit` | TypeScript type checking only, no output files. |
 | `npm run test` | `vitest run` | Single-pass unit test run. |
@@ -172,30 +170,25 @@ These are invoked internally by `make` targets. Use `make` for day-to-day work.
 The web payload cannot be hot-reloaded in the iOS Simulator — assets must live inside the app bundle. The sync pipeline automates this:
 
 ```
-src/ + public/pyodide/  →  npm run build:ci  →  dist/  →  sync-payload.sh  →  WebPayload/
-                                                                                    ↓
-                                                                          Xcode bundles WebPayload/
-                                                                          into the .app at build time
+FortWeb app/vendor/wheels  →  sync-payload.sh  →  WebPayload/
+                                               ↓
+                                     Xcode bundles WebPayload/
+                                     into the .app at build time
 ```
 
 The pipeline is split into two scripts:
 
-**`build-payload.sh`** (shared, platform-agnostic core):
+**`build-payload.sh`** (browser-only validation harness build):
 
 1. Runs `npm ci && npm run build:ci` to produce a deterministic `dist/`.
 2. Verifies `dist/build-manifest.json` exists and has the required fields.
 
-**`sync-payload.sh`** (iOS-specific, invoked by `make sync`) supports two modes:
+**`sync-payload.sh`** (iOS-specific, invoked by `make sync`) stages the live wrapper payload:
 
-- `PAYLOAD_SOURCE=fortweb`: default mainline convergence path; copies the FortWeb app, vendor, wheels, and runtime config into `WebPayload/fortweb/`, then writes a root redirect page for the iOS host
-- `PAYLOAD_SOURCE=fort-ios`: legacy proof-harness path; sources `build-payload.sh`, then stages the local Fort-ios payload
-
-In the `fort-ios` mode it then:
-
-3. Sanitises `python_stdlib.zip` — replaces `itms-services` with `itms_services` in `urllib/parse.py` (prevents automated App Store rejection).
-4. Cleans stale files from `WebPayload/`.
-5. Copies `dist/` contents into `WebPayload/`.
-6. Prints a summary (git SHA, file count).
+1. Copies the FortWeb app, vendor, wheels, and runtime config into `WebPayload/fortweb/`.
+2. Writes a root redirect page for the native host.
+3. Writes a FortWeb product-shell build manifest.
+4. Validates the staged payload contract before returning.
 
 > **Rule:** Always run the appropriate sync target after changing payload source files. Never manually edit `WebPayload/`.
 
@@ -240,11 +233,11 @@ Files: `src/__tests__/worker_router.test.ts` (12 tests), `src/__tests__/constant
 
 ### Layer 3 — Playwright E2E tests
 
-Structural browser tests that load the built app in Chromium headless and assert DOM invariants, JS error absence, and bridge contract alignment. Today these tests validate only the local seam-validation lane. They should not be read as end-to-end proof that the FortWeb-hosted product path is green. The Pyodide roundtrip test is tagged `@slow` (120 s) and excluded from the default CI run.
+Structural browser tests that load the local validation harness in Chromium headless and assert DOM invariants, JS error absence, and bridge contract alignment. They are useful for bridge and worker confidence, but they are not end-to-end confirmation that the FortWeb-hosted product path is green. The Pyodide roundtrip test is tagged `@slow` (120 s) and excluded from the default CI run.
 
 ```sh
 make test-e2e          # structural tests only (~5 s)
-make test-e2e-slow     # includes Pyodide boot roundtrip (~120 s)
+make test-e2e-slow     # includes Pyodide runtime roundtrip (~120 s)
 ```
 
 Files: `playwright/app.spec.ts`.
@@ -282,7 +275,7 @@ Message envelope shape (JS → Swift):
 ```
 Fort-ios/
 ├── src/                        # TypeScript source
-│   ├── main.ts                 # Legacy proof-harness entry point
+│   ├── main.ts                 # Browser-only validation harness entry point
 │   ├── bridge_adapter.ts       # Platform-agnostic bridge transport (iOS/Android/no-op)
 │   ├── pyodide_worker.ts       # Web Worker — WASM bootstrap lifecycle
 │   ├── worker_router.ts        # Pure message dispatch (testable without WASM)

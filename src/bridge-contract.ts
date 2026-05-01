@@ -10,14 +10,14 @@ export const BRIDGE_HANDLER_NAME = "bridge" as const;
 
 // ── Lifecycle states ────────────────────────────────────────────────────────
 export const LIFECYCLE_BOOT = "boot" as const;
-export const LIFECYCLE_PYODIDE_LOADING = "pyodide_loading" as const;
+export const LIFECYCLE_RUNTIME_STARTING = "runtime_starting" as const;
 export const LIFECYCLE_CRYPTO_READY = "crypto_ready" as const;
 export const LIFECYCLE_READY = "ready" as const;
 export const LIFECYCLE_ERROR = "error" as const;
 
 export const LIFECYCLE_STATES = [
     LIFECYCLE_BOOT,
-    LIFECYCLE_PYODIDE_LOADING,
+    LIFECYCLE_RUNTIME_STARTING,
     LIFECYCLE_CRYPTO_READY,
     LIFECYCLE_READY,
     LIFECYCLE_ERROR,

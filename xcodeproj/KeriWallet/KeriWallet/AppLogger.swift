@@ -8,7 +8,7 @@
 //  Usage:
 //    AppLogger.info("App launched", category: "AppDelegate")
 //    AppLogger.debug("User: \(id)", category: "WebBridge", privacy: .private)
-//    AppLogger.error("Load failed", error: err, category: "SchemeHandler")
+//    AppLogger.error("Request failed", error: err, category: "SchemeHandler")
 //
 
 import Foundation

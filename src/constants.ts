@@ -39,7 +39,7 @@ export const IDB_DATABASE_NAME = 'keri-wallet';
 /** IndexedDB store name for the default key-value namespace. */
 export const IDB_DEFAULT_STORE = 'main';
 
-// ── FortWeb storage proof mapping ──────────────────────────────────────────
+// ── FortWeb storage compatibility mapping ───────────────────────────────────
 /** FortWeb registry database name used by the browser lane. */
 export const FORTWEB_REGISTRY_NAME = 'fortweb-vault-registry';
 
@@ -70,6 +70,6 @@ export function fortwebVaultWorkerStore(
 	return `${fortwebVaultStorageName(vaultId)}:${subdb}`;
 }
 
-// ── Demo / Proof ─────────────────────────────────────────────────────────────
-/** Challenge string used in the boot-time proof-of-concept crypto cycle. */
-export const PROOF_CHALLENGE = 'fortweb proof vector v1';
+// ── Local validation harness ────────────────────────────────────────────────
+/** Validation message used in the browser-only crypto round-trip check. */
+export const VALIDATION_MESSAGE = 'fort-ios runtime validation';
