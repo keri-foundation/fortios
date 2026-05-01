@@ -64,7 +64,7 @@ final class KeriWalletUITests: XCTestCase {
             return
         }
 
-        let openButton = webView.buttons["Open Vault"]
+        let openButton = firstOpenVaultButton(in: webView)
         guard openButton.waitForExistence(timeout: 15) else {
             // No vault exists yet; this is expected on a fresh install.
             return
@@ -86,7 +86,7 @@ final class KeriWalletUITests: XCTestCase {
             return
         }
 
-        let openVaultButton = webView.buttons["Open Vault"]
+        let openVaultButton = firstOpenVaultButton(in: webView)
         guard openVaultButton.waitForExistence(timeout: 15) else {
             return
         }
@@ -192,11 +192,18 @@ final class KeriWalletUITests: XCTestCase {
 
     // MARK: - Helpers
 
+    /// FortWeb renders one "Open Vault" action per locked vault card.
+    /// Use a deterministic first match so UI tests exercise a real vault flow
+    /// without depending on there being only one stored vault.
+    private func firstOpenVaultButton(in webView: XCUIElement) -> XCUIElement {
+        webView.buttons.matching(identifier: "Open Vault").firstMatch
+    }
+
     /// Attempts to navigate from the vault picker into an unlocked vault.
     /// Returns `false` if no vault exists (test will be silently skipped).
     @discardableResult
     private func navigateToUnlockedVault(webView: XCUIElement) -> Bool {
-        let openButton = webView.buttons["Open Vault"]
+        let openButton = firstOpenVaultButton(in: webView)
         let returnButton = webView.buttons["Return to Vault"]
 
         if returnButton.waitForExistence(timeout: 15) {
