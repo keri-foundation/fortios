@@ -257,10 +257,10 @@ make test-all   # test-swift + test-ts + test-e2e
 The JS↔native bridge is governed by a typed contract so all sides stay in sync.
 
 - **Source of truth:** `bridge-contract.json` (committed)
-- **Generated:** `src/bridge-contract.ts` (TypeScript), `KeriWallet/BridgeContract.swift` (Swift), and `generated/BridgeContract.kt` (Kotlin for Fort-android)
-- **Verify sync:** `make bridge-check` (exits non-zero if generated output differs from committed JSON)
+- **Generated:** `src/bridge-contract.ts` (TypeScript), `KeriWallet/BridgeContract.swift` (Swift), and `generated/BridgeContract.kt` (Kotlin for Fort-android, generated locally when needed)
+- **Verify sync:** `make bridge-check` regenerates all outputs, then fails if the tracked TypeScript or Swift contract files drift from committed JSON
 
-The `prebuild` npm hook regenerates both files automatically before every build. In CI, `make bridge-check` must pass before tests run.
+The `prebuild` npm hook regenerates all contract outputs automatically before every build. In CI, `make bridge-check` must pass before tests run.
 
 Message envelope shape (JS → Swift):
 
@@ -282,7 +282,7 @@ Fort-ios/
 │   ├── bridge-contract.ts      # Generated — do not edit by hand
 │   └── __tests__/              # Vitest unit tests
 ├── generated/
-│   └── BridgeContract.kt       # Generated Kotlin constants (for Fort-android)
+│   └── BridgeContract.kt       # Generated Kotlin constants (for Fort-android, not committed)
 ├── public/
 │   └── pyodide/                # Gitignored — populated by `make pyodide`
 ├── playwright/
