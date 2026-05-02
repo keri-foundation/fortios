@@ -18,6 +18,18 @@ struct AppConfigTests {
         #expect(AppConfig.Scheme.entryURL.hasPrefix(AppConfig.Scheme.name + "://"))
     }
 
+    @Test("entry URL stays pinned to local app index")
+    func entryURLPinnedToLocalIndex() {
+        #expect(
+            AppConfig.Scheme.entryURL
+                == "\(AppConfig.Scheme.name)://local/\(AppConfig.Scheme.defaultIndexPath)")
+    }
+
+    @Test("aboutBlankURL stays pinned to WebKit blank page")
+    func aboutBlankURLPinned() {
+        #expect(AppConfig.Scheme.aboutBlankURL == "about:blank")
+    }
+
     @Test("defaultIndexPath is index.html")
     func defaultIndexPath() {
         #expect(AppConfig.Scheme.defaultIndexPath == "index.html")
@@ -40,6 +52,11 @@ struct AppConfigTests {
     @Test("bundleSubdirectory is non-empty")
     func bundleSubdirectoryNonEmpty() {
         #expect(!AppConfig.Payload.bundleSubdirectory.isEmpty)
+    }
+
+    @Test("bundleSubdirectory stays pinned to WebPayload")
+    func bundleSubdirectoryPinned() {
+        #expect(AppConfig.Payload.bundleSubdirectory == "WebPayload")
     }
 
     @Test("payload manifest contract stays pinned to FortWeb product shell")
@@ -69,5 +86,11 @@ struct AppConfigTests {
     func coepValue() {
         let headers = Dictionary(uniqueKeysWithValues: AppConfig.HTTP.crossOriginHeaders)
         #expect(headers["Cross-Origin-Embedder-Policy"] == "require-corp")
+    }
+
+    @Test("CORP header value is cross-origin")
+    func corpValue() {
+        let headers = Dictionary(uniqueKeysWithValues: AppConfig.HTTP.crossOriginHeaders)
+        #expect(headers["Cross-Origin-Resource-Policy"] == "cross-origin")
     }
 }

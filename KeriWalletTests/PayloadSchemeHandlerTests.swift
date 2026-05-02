@@ -241,6 +241,26 @@ struct PathNormalisationTests {
         #expect(!mime.contains("charset"))
     }
 
+    @Test("nested FortWeb entry document loads with HTML MIME")
+    func nestedFortWebEntryDocumentLoads() throws {
+        let tmp: URL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        let nestedDir = tmp.appendingPathComponent("fortweb/app", isDirectory: true)
+        try FileManager.default.createDirectory(at: nestedDir, withIntermediateDirectories: true)
+        try writeValidPayloadManifest(tmp)
+        _ = try writeFile(nestedDir.appendingPathComponent("index.html"), content: "<html>fortweb</html>")
+
+        let handler = makeHandler(dir: tmp)
+        let url = URL(string: "\(AppConfig.Scheme.name)://local/fortweb/app/index.html")!
+        let (data, mime, _) = try handler.loadResource(for: url)
+
+        #expect(!data.isEmpty)
+        #expect(mime.hasPrefix("text/html"))
+    }
+
     @Test("serving index retains an operator-visible breadcrumb")
     func servingIndexRetainsBreadcrumb() throws {
         AppLogger.resetRetainedBreadcrumbs()
@@ -263,6 +283,26 @@ struct PathNormalisationTests {
         #expect(breadcrumb?.level == .notice)
         #expect(breadcrumb?.category == AppConfig.Log.schemeHandler)
         #expect(breadcrumb?.message.contains("served initial document") == true)
+    }
+
+    @Test("payload manifest missing entry_document throws invalidPayloadManifest")
+    func payloadManifestMissingEntryDocumentThrows() throws {
+        let tmp: URL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        _ = try writeFile(
+            tmp.appendingPathComponent("build-manifest.json"),
+            content: #"{"producer":"fortweb-shared","payload_profile":"product-shell"}"#
+        )
+        _ = try writeFile(tmp.appendingPathComponent("index.html"), content: "<html></html>")
+
+        let handler = makeHandler(dir: tmp)
+        let url = URL(string: "\(AppConfig.Scheme.name)://local/index.html")!
+        #expect(throws: PayloadSchemeError.invalidPayloadManifest) {
+            _ = try handler.loadResource(for: url)
+        }
     }
 
     @Test("invalid payload manifest throws invalidPayloadManifest")
