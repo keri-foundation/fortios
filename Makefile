@@ -53,7 +53,7 @@ test-e2e-slow: ## Run all E2E tests including slow Pyodide roundtrip (120s timeo
 	npm run build
 	npx playwright test
 
-bridge-check: ## Verify bridge-contract.ts, BridgeContract.swift, and BridgeContract.kt are up to date
+bridge-check: ## Regenerate bridge outputs and fail if tracked TS/Swift contract files drift
 	npm run bridge:check
 
 lint-ts: ## Run TypeScript type check (tsc --noEmit)

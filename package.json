@@ -7,7 +7,7 @@
     "prebuild": "node tools/gen-bridge-contract.mjs",
     "build": "vite build",
     "build:ci": "node tools/gen-bridge-contract.mjs && vite build && node tools/gen-build-manifest.mjs",
-    "bridge:check": "node tools/gen-bridge-contract.mjs --check",
+    "bridge:check": "node tools/gen-bridge-contract.mjs && git diff --exit-code -- src/bridge-contract.ts xcodeproj/KeriWallet/KeriWallet/BridgeContract.swift",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
