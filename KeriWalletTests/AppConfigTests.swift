@@ -42,6 +42,13 @@ struct AppConfigTests {
         #expect(!AppConfig.Payload.bundleSubdirectory.isEmpty)
     }
 
+    @Test("payload manifest contract stays pinned to FortWeb product shell")
+    func payloadManifestContract() {
+        #expect(AppConfig.Payload.requiredProducer == "fortweb-shared")
+        #expect(AppConfig.Payload.requiredProfile == "product-shell")
+        #expect(AppConfig.Payload.requiredEntryDocument == "fortweb/app/index.html")
+    }
+
     // MARK: - HTTP
 
     @Test("crossOriginHeaders contains all three required keys")
