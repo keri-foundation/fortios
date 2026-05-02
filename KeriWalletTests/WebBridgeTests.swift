@@ -164,6 +164,43 @@ struct WebBridgeLoggingClassificationTests {
     }
 }
 
+@Suite("FortWeb runtime diagnostic parsing")
+struct FortWebRuntimeDiagnosticParsingTests {
+
+    @Test("parses quoted runtime fields")
+    func parsesQuotedFields() {
+        let diagnostic = FortWebRuntimeDiagnostic.parse(
+            #"[fortweb.runtime] event=worker_lifecycle state="ready" level="info""#)
+
+        #expect(diagnostic?.event == "worker_lifecycle")
+        #expect(diagnostic?.state == "ready")
+        #expect(diagnostic?.level == "info")
+    }
+
+    @Test("parses plain runtime fields")
+    func parsesPlainFields() {
+        let diagnostic = FortWebRuntimeDiagnostic.parse(
+            "[fortweb.runtime] event=request_end level=warning state=degraded")
+
+        #expect(diagnostic?.event == "request_end")
+        #expect(diagnostic?.level == "warning")
+        #expect(diagnostic?.state == "degraded")
+    }
+
+    @Test("returns nil for non-runtime messages")
+    func ignoresNonRuntimeMessages() {
+        #expect(FortWebRuntimeDiagnostic.parse("plain log line") == nil)
+    }
+
+    @Test("returns nil when runtime message omits event")
+    func ignoresRuntimeMessagesWithoutEvent() {
+        let diagnostic = FortWebRuntimeDiagnostic.parse(
+            #"[fortweb.runtime] level="warning" state="booting""#)
+
+        #expect(diagnostic == nil)
+    }
+}
+
 // MARK: - BridgeContract cross-language consistency
 
 @Suite("BridgeContract cross-language consistency")
