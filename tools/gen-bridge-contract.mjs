@@ -8,7 +8,7 @@
 //   3. generated/BridgeContract.kt — Kotlin constants (for Fort-android)
 //
 // Run: node tools/gen-bridge-contract.mjs
-// CI:  node tools/gen-bridge-contract.mjs --check  (exits 1 if generated files are stale)
+// CI:  npm run bridge:check  (regenerates TS/Swift, then fails if tracked files drift)
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
@@ -275,10 +275,8 @@ if (isCheck) {
         console.error(`STALE: ${swiftOutPath}`);
         stale = true;
     }
-    if (!existsSync(kotlinOutPath) || readFileSync(kotlinOutPath, 'utf-8') !== kotlinContent) {
-        console.error(`STALE: ${kotlinOutPath}`);
-        stale = true;
-    }
+    // BridgeContract.kt is gitignored — generated locally when needed, not tracked.
+    // Skip it in --check mode to avoid false failures on clean clones.
 
     if (stale) {
         console.error('Bridge contract files are out of date. Run: node tools/gen-bridge-contract.mjs');
