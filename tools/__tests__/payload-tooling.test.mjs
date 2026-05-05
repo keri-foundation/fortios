@@ -195,6 +195,40 @@ describe('validate-pyodide-runtime.mjs', () => {
         expect(error.stdout).toContain('[pyodide-check] detected pyodide asset mode: esm');
         expect(error.stdout).toContain('[pyodide-check] result: FAIL');
     });
+
+    it('fails fast when --worker is missing a value', async () => {
+        const payloadDir = await makeTempDir();
+        const assetPath = path.join(payloadDir, 'pyodide.js');
+
+        await writeTextFile(assetPath, 'export function loadPyodide() { return true; }\n');
+
+        const error = await runNodeScriptExpectFailure(validatePyodideRuntimeScript, [
+            '--worker',
+            '--asset',
+            assetPath,
+        ]);
+
+        expect(error.stderr).toContain('missing value for --worker');
+    });
+
+    it('fails when worker mode is unknown', async () => {
+        const payloadDir = await makeTempDir();
+        const workerPath = path.join(payloadDir, 'pyodide_worker.ts');
+        const assetPath = path.join(payloadDir, 'pyodide.js');
+
+        await writeTextFile(workerPath, 'export const boot = true;\n');
+        await writeTextFile(assetPath, 'globalThis.loadPyodide = () => true;\n');
+
+        const error = await runNodeScriptExpectFailure(validatePyodideRuntimeScript, [
+            '--worker',
+            workerPath,
+            '--asset',
+            assetPath,
+        ]);
+
+        expect(error.stdout).toContain('[pyodide-check] detected worker mode: unknown');
+        expect(error.stdout).toContain('[pyodide-check] result: FAIL');
+    });
 });
 
 describe('gen-fortweb-bundle-manifest.mjs', () => {
