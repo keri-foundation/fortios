@@ -51,9 +51,8 @@ The browser validation harness is non-shipped. The app bundle must stage and ser
 Pyodide currently ships Python **3.13**. Any Python code loaded in the web payload
 (via `runPythonAsync`) must be compatible with 3.13 — do not use Python 3.14-only
 features until Pyodide releases a 3.14 build. This applies regardless of what
-keripy uses on the server side. See the
-[2026-02-24 meeting](docs/meetings/raw-transcripts/2026-02/2026-02-24-pt-3.md)
-for Sam's directive on this constraint.
+keripy uses on the server side. See the 2026-02-24 KERI Foundation dev meeting
+(workspace docs) for Sam's directive on this constraint.
 
 ---
 
@@ -344,14 +343,16 @@ Fort-ios/
 
 ### Workspace instructions
 
+These files live in the keri-notes workspace, not in this repo.
+
 | File | Covers |
 |------|--------|
-| [.github/instructions/ios-swift-coding.instructions.md](.github/instructions/ios-swift-coding.instructions.md) | Swift style, naming, DI patterns, testing with swift-testing |
-| [.github/instructions/ios-xcode-workflow.instructions.md](.github/instructions/ios-xcode-workflow.instructions.md) | Xcode build/CI workflow, anti-patterns catalog, `xcodebuild` reference |
-| [.github/instructions/ios-wkwebview-pyodide-bundled-payload.instructions.md](.github/instructions/ios-wkwebview-pyodide-bundled-payload.instructions.md) | WKWebView rules, scheme handler, worker architecture, telemetry bridge |
-| [.github/instructions/pyodide-config.instructions.md](.github/instructions/pyodide-config.instructions.md) | Pyodide version, wheel sources, `unpackArchive` install pattern |
-| [.github/instructions/pyodide-event-loop.instructions.md](.github/instructions/pyodide-event-loop.instructions.md) | Asyncio event loop inside Pyodide WASM |
-| [.github/instructions/pyodide-js-bridge.instructions.md](.github/instructions/pyodide-js-bridge.instructions.md) | Python↔JavaScript data passing via Pyodide proxy objects |
+| `.github/instructions/ios-swift-coding.instructions.md` | Swift style, naming, DI patterns, testing with swift-testing |
+| `.github/instructions/ios-xcode-workflow.instructions.md` | Xcode build/CI workflow, anti-patterns catalog, `xcodebuild` reference |
+| `.github/instructions/ios-wkwebview-pyodide-bundled-payload.instructions.md` | WKWebView rules, scheme handler, worker architecture, telemetry bridge |
+| `.github/instructions/pyodide-config.instructions.md` | Pyodide version, wheel sources, `unpackArchive` install pattern |
+| `.github/instructions/pyodide-event-loop.instructions.md` | Asyncio event loop inside Pyodide WASM |
+| `.github/instructions/pyodide-js-bridge.instructions.md` | Python↔JavaScript data passing via Pyodide proxy objects |
 
 ### Conference validation
 
