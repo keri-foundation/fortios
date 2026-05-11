@@ -107,7 +107,7 @@ make logs-sim
 make logs-device DEVICE_REF=<udid-or-name>
 ```
 
-For conference acceptance and simulator/device parity runs, use [CONFERENCE-IOS-VALIDATION-CHECKLIST.md](libs/Fort-ios/CONFERENCE-IOS-VALIDATION-CHECKLIST.md).
+For conference acceptance and simulator/device parity runs, use [CONFERENCE-IOS-VALIDATION-CHECKLIST.md](CONFERENCE-IOS-VALIDATION-CHECKLIST.md).
 
 Run `make help` at any time to list all available targets.
 
@@ -202,7 +202,7 @@ The pipeline is split into two scripts:
 
 ## 7. Testing
 
-Fort-ios uses a three-layer test pyramid. See [ADR-030](docs/adr/ADR-030-ios-ts-testing-architecture.md) for the full rationale.
+Fort-ios uses a three-layer test pyramid. See ADR-030 in the workspace docs for the full rationale.
 
 ### Layer 1 — Swift unit tests (swift-testing)
 
