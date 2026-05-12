@@ -103,6 +103,7 @@ jobs:
 
   swift-tests:
     runs-on: macos-15
+    timeout-minutes: 20
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.0.1.app/Contents/Developer
       FORTWEB_DIR: ${{ github.workspace }}/.deps/fortweb
@@ -138,7 +139,7 @@ jobs:
         run: |
           SIMULATOR_UDID="$(bash scripts/resolve-simulator-udid.sh "$SIMULATOR_NAME" "$SIMULATOR_OS")"
           xcrun simctl boot "$SIMULATOR_UDID" >/dev/null 2>&1 || true
-          xcrun simctl bootstatus "$SIMULATOR_UDID" -b
+          bash scripts/wait-for-simulator-boot.sh "$SIMULATOR_UDID" 180
 
       - name: Run Swift unit and UI tests
         run: make test-swift

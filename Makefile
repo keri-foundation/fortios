@@ -121,7 +121,7 @@ ios-doctor: ## Show Xcode, simulator, payload-source, and physical-device readin
 
 focus-sim: require-simulator ## Boot and foreground the configured Simulator target
 	@xcrun simctl boot "$(SIMULATOR_DEVICE)" >/dev/null 2>&1 || true
-	@xcrun simctl bootstatus "$(SIMULATOR_DEVICE)" -b
+	@bash scripts/wait-for-simulator-boot.sh "$(SIMULATOR_DEVICE)" 180
 	@open -a Simulator --args -CurrentDeviceUDID "$(SIMULATOR_DEVICE)" >/dev/null 2>&1 || open -a Simulator || true
 	@osascript -e 'tell application "Simulator" to activate' >/dev/null 2>&1 || true
 
