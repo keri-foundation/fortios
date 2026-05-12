@@ -51,9 +51,8 @@ The browser validation harness is non-shipped. The app bundle must stage and ser
 Pyodide currently ships Python **3.13**. Any Python code loaded in the web payload
 (via `runPythonAsync`) must be compatible with 3.13 — do not use Python 3.14-only
 features until Pyodide releases a 3.14 build. This applies regardless of what
-keripy uses on the server side. See the
-[2026-02-24 meeting](docs/meetings/raw-transcripts/2026-02/2026-02-24-pt-3.md)
-for Sam's directive on this constraint.
+keripy uses on the server side. See the 2026-02-24 KERI Foundation dev meeting
+(workspace docs) for Sam's directive on this constraint.
 
 ---
 
@@ -108,7 +107,7 @@ make logs-sim
 make logs-device DEVICE_REF=<udid-or-name>
 ```
 
-For conference acceptance and simulator/device parity runs, use [CONFERENCE-IOS-VALIDATION-CHECKLIST.md](libs/Fort-ios/CONFERENCE-IOS-VALIDATION-CHECKLIST.md).
+For conference acceptance and simulator/device parity runs, use [CONFERENCE-IOS-VALIDATION-CHECKLIST.md](CONFERENCE-IOS-VALIDATION-CHECKLIST.md).
 
 Run `make help` at any time to list all available targets.
 
@@ -203,7 +202,7 @@ The pipeline is split into two scripts:
 
 ## 7. Testing
 
-Fort-ios uses a three-layer test pyramid. See [ADR-030](docs/adr/ADR-030-ios-ts-testing-architecture.md) for the full rationale.
+Fort-ios uses a three-layer test pyramid. See ADR-030 in the workspace docs for the full rationale.
 
 ### Layer 1 — Swift unit tests (swift-testing)
 
@@ -257,10 +256,10 @@ make test-all   # test-swift + test-ts + test-e2e
 The JS↔native bridge is governed by a typed contract so all sides stay in sync.
 
 - **Source of truth:** `bridge-contract.json` (committed)
-- **Generated:** `src/bridge-contract.ts` (TypeScript), `KeriWallet/BridgeContract.swift` (Swift), and `generated/BridgeContract.kt` (Kotlin for Fort-android)
-- **Verify sync:** `make bridge-check` (exits non-zero if generated output differs from committed JSON)
+- **Generated:** `src/bridge-contract.ts` (TypeScript), `KeriWallet/BridgeContract.swift` (Swift), and `generated/BridgeContract.kt` (Kotlin for Fort-android, generated locally when needed)
+- **Verify sync:** `make bridge-check` regenerates all outputs, then fails if the tracked TypeScript or Swift contract files drift from committed JSON
 
-The `prebuild` npm hook regenerates both files automatically before every build. In CI, `make bridge-check` must pass before tests run.
+The `prebuild` npm hook regenerates all contract outputs automatically before every build. In CI, `make bridge-check` must pass before tests run.
 
 Message envelope shape (JS → Swift):
 
@@ -282,7 +281,7 @@ Fort-ios/
 │   ├── bridge-contract.ts      # Generated — do not edit by hand
 │   └── __tests__/              # Vitest unit tests
 ├── generated/
-│   └── BridgeContract.kt       # Generated Kotlin constants (for Fort-android)
+│   └── BridgeContract.kt       # Generated Kotlin constants (for Fort-android, not committed)
 ├── public/
 │   └── pyodide/                # Gitignored — populated by `make pyodide`
 ├── playwright/
@@ -344,14 +343,16 @@ Fort-ios/
 
 ### Workspace instructions
 
+These files live in the keri-notes workspace, not in this repo.
+
 | File | Covers |
 |------|--------|
-| [.github/instructions/ios-swift-coding.instructions.md](.github/instructions/ios-swift-coding.instructions.md) | Swift style, naming, DI patterns, testing with swift-testing |
-| [.github/instructions/ios-xcode-workflow.instructions.md](.github/instructions/ios-xcode-workflow.instructions.md) | Xcode build/CI workflow, anti-patterns catalog, `xcodebuild` reference |
-| [.github/instructions/ios-wkwebview-pyodide-bundled-payload.instructions.md](.github/instructions/ios-wkwebview-pyodide-bundled-payload.instructions.md) | WKWebView rules, scheme handler, worker architecture, telemetry bridge |
-| [.github/instructions/pyodide-config.instructions.md](.github/instructions/pyodide-config.instructions.md) | Pyodide version, wheel sources, `unpackArchive` install pattern |
-| [.github/instructions/pyodide-event-loop.instructions.md](.github/instructions/pyodide-event-loop.instructions.md) | Asyncio event loop inside Pyodide WASM |
-| [.github/instructions/pyodide-js-bridge.instructions.md](.github/instructions/pyodide-js-bridge.instructions.md) | Python↔JavaScript data passing via Pyodide proxy objects |
+| `.github/instructions/ios-swift-coding.instructions.md` | Swift style, naming, DI patterns, testing with swift-testing |
+| `.github/instructions/ios-xcode-workflow.instructions.md` | Xcode build/CI workflow, anti-patterns catalog, `xcodebuild` reference |
+| `.github/instructions/ios-wkwebview-pyodide-bundled-payload.instructions.md` | WKWebView rules, scheme handler, worker architecture, telemetry bridge |
+| `.github/instructions/pyodide-config.instructions.md` | Pyodide version, wheel sources, `unpackArchive` install pattern |
+| `.github/instructions/pyodide-event-loop.instructions.md` | Asyncio event loop inside Pyodide WASM |
+| `.github/instructions/pyodide-js-bridge.instructions.md` | Python↔JavaScript data passing via Pyodide proxy objects |
 
 ### Conference validation
 
