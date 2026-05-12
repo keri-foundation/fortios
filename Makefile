@@ -46,7 +46,7 @@ test-ts: ## Run TypeScript unit tests (Vitest)
 	npm run test
 
 test-e2e: ## Run Playwright E2E tests (excludes @slow Pyodide tests)
-	bash build-payload.sh
+		npm run build
 	npx playwright test --grep-invert "@slow"
 
 test-e2e-slow: ## Run all E2E tests including slow Pyodide roundtrip (120s timeout)
