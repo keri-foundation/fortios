@@ -88,6 +88,9 @@ make sync                       # default: FortWeb convergence path
 make sync-fortweb              # explicit alias for the same FortWeb path
 make payload-contract
 
+# Optional: stage a deterministic FortWeb ref instead of mutable local ../fortweb
+PAYLOAD_SOURCE=fortweb FORTWEB_FETCH=1 FORTWEB_REF=214643f4fa907061334c09c8297c4d1e59f18f45 make payload-contract
+
 # 3. Run the fast local checks
 make lint                      # SwiftLint (Swift sources)
 make lint-ts                   # tsc --noEmit (TypeScript)
@@ -188,6 +191,8 @@ The pipeline is split into two scripts:
 2. Writes a root redirect page for the native host.
 3. Writes a FortWeb product-shell build manifest.
 4. Validates the staged payload contract before returning.
+
+For deterministic staging, set `FORTWEB_FETCH=1` and `FORTWEB_REF=<commit-or-tag-or-branch>` so the script fetches a temporary FortWeb checkout instead of consuming mutable local `../fortweb` state.
 
 > **Rule:** Always run the appropriate sync target after changing payload source files. Never manually edit `WebPayload/`.
 

@@ -5,6 +5,9 @@ SCHEME        := KeriWallet
 APP_BUNDLE_ID := com.kerifoundation.wallet
 PAYLOAD_SOURCE ?= fortweb
 FORTWEB_DIR   ?= ../fortweb
+FORTWEB_FETCH ?= 0
+FORTWEB_REF ?= 214643f4fa907061334c09c8297c4d1e59f18f45
+FORTWEB_REMOTE ?= https://github.com/keri-foundation/fortweb.git
 SIMULATOR_NAME ?= iPhone 17 Pro
 SIMULATOR_OS   ?= auto
 SIMULATOR_UDID ?=
@@ -62,14 +65,14 @@ lint-ts: ## Run TypeScript type check (tsc --noEmit)
 # ── iOS-only targets ──────────────────────────────────────────────────────────
 
 sync: ## Stage the shipped FortWeb payload into WebPayload/
-	PAYLOAD_SOURCE=$(PAYLOAD_SOURCE) FORTWEB_DIR=$(FORTWEB_DIR) ./sync-payload.sh
+	PAYLOAD_SOURCE=$(PAYLOAD_SOURCE) FORTWEB_DIR=$(FORTWEB_DIR) FORTWEB_FETCH=$(FORTWEB_FETCH) FORTWEB_REF=$(FORTWEB_REF) FORTWEB_REMOTE=$(FORTWEB_REMOTE) ./sync-payload.sh
 
 sync-fortweb: ## Explicit alias for the FortWeb wrapper staging path
-	PAYLOAD_SOURCE=fortweb FORTWEB_DIR=$(FORTWEB_DIR) ./sync-payload.sh
+	PAYLOAD_SOURCE=fortweb FORTWEB_DIR=$(FORTWEB_DIR) FORTWEB_FETCH=$(FORTWEB_FETCH) FORTWEB_REF=$(FORTWEB_REF) FORTWEB_REMOTE=$(FORTWEB_REMOTE) ./sync-payload.sh
 
 payload-contract: ## Fail closed on blocked payload regressions and validate staged WebPayload
 	node tools/assert-no-proof-demo-shell.mjs
-	PAYLOAD_SOURCE=fortweb FORTWEB_DIR=$(FORTWEB_DIR) ./sync-payload.sh
+	PAYLOAD_SOURCE=fortweb FORTWEB_DIR=$(FORTWEB_DIR) FORTWEB_FETCH=$(FORTWEB_FETCH) FORTWEB_REF=$(FORTWEB_REF) FORTWEB_REMOTE=$(FORTWEB_REMOTE) ./sync-payload.sh
 	node tools/validate-mobile-payload.mjs --payload-dir WebPayload --target ios-webpayload
 
 ios-list-sims: ## List available iOS Simulator destinations
@@ -99,10 +102,17 @@ ios-doctor: ## Show Xcode, simulator, payload-source, and physical-device readin
 	@command -v xcrun >/dev/null || (echo "ERROR: xcrun not found" && exit 1)
 	@echo "payload-source=$(PAYLOAD_SOURCE)"
 	@if [ "$(PAYLOAD_SOURCE)" = "fortweb" ]; then \
-		[ -d "$(FORTWEB_DIR)" ] || (echo "ERROR: FortWeb repo not found at $(FORTWEB_DIR)" && exit 1); \
-		[ -f "$(FORTWEB_DIR)/app/index.html" ] || (echo "ERROR: FortWeb app/index.html missing" && exit 1); \
-		[ -f "$(FORTWEB_DIR)/pyscript-ci.toml" ] || (echo "ERROR: FortWeb pyscript-ci.toml missing" && exit 1); \
+		if [ "$(FORTWEB_FETCH)" = "1" ]; then \
+			command -v git >/dev/null || (echo "ERROR: git is required when FORTWEB_FETCH=1" && exit 1); \
+		else \
+			[ -d "$(FORTWEB_DIR)" ] || (echo "ERROR: FortWeb repo not found at $(FORTWEB_DIR)" && exit 1); \
+			[ -f "$(FORTWEB_DIR)/app/index.html" ] || (echo "ERROR: FortWeb app/index.html missing" && exit 1); \
+			[ -f "$(FORTWEB_DIR)/pyscript-ci.toml" ] || (echo "ERROR: FortWeb pyscript-ci.toml missing" && exit 1); \
+		fi; \
 	fi
+	@echo "fortweb-fetch=$(FORTWEB_FETCH)"
+	@echo "fortweb-ref=$(FORTWEB_REF)"
+	@echo "fortweb-remote=$(FORTWEB_REMOTE)"
 	@echo "simulator-name=$(SIMULATOR_NAME)"
 	@echo "simulator-os=$(SIMULATOR_OS)"
 	@echo "simulator-destination=$(SIMULATOR_DEST)"
@@ -176,10 +186,10 @@ parity-smoke: ## Run the shared payload through simulator then device (requires 
 		exit 1; \
 	fi
 	xcrun simctl shutdown all || true
-	$(MAKE) dev-sim PAYLOAD_SOURCE=$(PAYLOAD_SOURCE) FORTWEB_DIR=$(FORTWEB_DIR)
-	$(MAKE) run-sim PAYLOAD_SOURCE=$(PAYLOAD_SOURCE) FORTWEB_DIR=$(FORTWEB_DIR)
-	$(MAKE) dev-device PAYLOAD_SOURCE=$(PAYLOAD_SOURCE) FORTWEB_DIR=$(FORTWEB_DIR)
-	$(MAKE) run-device PAYLOAD_SOURCE=$(PAYLOAD_SOURCE) FORTWEB_DIR=$(FORTWEB_DIR) DEVICE_REF="$(DEVICE_REF)"
+	$(MAKE) dev-sim PAYLOAD_SOURCE=$(PAYLOAD_SOURCE) FORTWEB_DIR=$(FORTWEB_DIR) FORTWEB_FETCH=$(FORTWEB_FETCH) FORTWEB_REF=$(FORTWEB_REF) FORTWEB_REMOTE=$(FORTWEB_REMOTE)
+	$(MAKE) run-sim PAYLOAD_SOURCE=$(PAYLOAD_SOURCE) FORTWEB_DIR=$(FORTWEB_DIR) FORTWEB_FETCH=$(FORTWEB_FETCH) FORTWEB_REF=$(FORTWEB_REF) FORTWEB_REMOTE=$(FORTWEB_REMOTE)
+	$(MAKE) dev-device PAYLOAD_SOURCE=$(PAYLOAD_SOURCE) FORTWEB_DIR=$(FORTWEB_DIR) FORTWEB_FETCH=$(FORTWEB_FETCH) FORTWEB_REF=$(FORTWEB_REF) FORTWEB_REMOTE=$(FORTWEB_REMOTE)
+	$(MAKE) run-device PAYLOAD_SOURCE=$(PAYLOAD_SOURCE) FORTWEB_DIR=$(FORTWEB_DIR) FORTWEB_FETCH=$(FORTWEB_FETCH) FORTWEB_REF=$(FORTWEB_REF) FORTWEB_REMOTE=$(FORTWEB_REMOTE) DEVICE_REF="$(DEVICE_REF)"
 
 logs-sim: ## Show recent simulator logs for KeriWallet
 	xcrun simctl spawn booted log show --style compact --last 10m --predicate 'subsystem == "com.kerifoundation.wallet" AND (category == "WebBridge" OR category == "WebContainer" OR category == "SchemeHandler" OR category == "WebNav")' | tail -n 200
