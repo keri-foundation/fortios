@@ -110,6 +110,16 @@ make logs-sim
 make logs-device DEVICE_REF=<udid-or-name>
 ```
 
+### Known-good baseline
+
+For review and debug runs, use deterministic FortWeb ref staging and treat [KNOWN-GOOD-IOS-BASELINE.md](KNOWN-GOOD-IOS-BASELINE.md) as the source of truth for the current known-good tuple.
+
+```sh
+PAYLOAD_SOURCE=fortweb FORTWEB_FETCH=1 FORTWEB_REF=214643f4fa907061334c09c8297c4d1e59f18f45 make payload-contract
+```
+
+Do not use dirty local FortWeb HEAD or hand-edited `WebPayload/` as review evidence.
+
 For conference acceptance and simulator/device parity runs, use [CONFERENCE-IOS-VALIDATION-CHECKLIST.md](CONFERENCE-IOS-VALIDATION-CHECKLIST.md).
 
 Run `make help` at any time to list all available targets.
@@ -363,6 +373,7 @@ These files live in the keri-notes workspace, not in this repo.
 
 | File | Purpose |
 |------|---------|
+| [KNOWN-GOOD-IOS-BASELINE.md](KNOWN-GOOD-IOS-BASELINE.md) | Frozen Fort-ios wrapper + payload + simulator tuple for regression restore and reviewable evidence |
 | [CONFERENCE-IOS-VALIDATION-CHECKLIST.md](CONFERENCE-IOS-VALIDATION-CHECKLIST.md) | End-to-end simulator and physical-device validation script for conference acceptance |
 
 ---

@@ -26,6 +26,16 @@ Expected:
 - No bridge contract drift.
 - No Playwright structural failures.
 
+### Known-good baseline smoke
+
+- Verify [WebPayload/build-manifest.json](WebPayload/build-manifest.json) matches the baseline tuple in [KNOWN-GOOD-IOS-BASELINE.md](KNOWN-GOOD-IOS-BASELINE.md).
+- Launch `iPhone 16e` / `iOS 26.0` simulator.
+- Create a test vault.
+- Open/login to the test vault.
+- Confirm logged-in Identifiers shell.
+- Confirm bottom navigation shows `Identifiers`, `Remotes`, `Foundation`, `Settings`.
+- Capture screenshot or note evidence path.
+
 ## 2. Simulator Pass
 
 Build and run:
