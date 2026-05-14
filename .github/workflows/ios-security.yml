@@ -109,6 +109,10 @@ jobs:
       FORTWEB_DIR: ${{ github.workspace }}/.deps/fortweb
       SIMULATOR_NAME: 'iPhone 17 Pro'
       SIMULATOR_OS: '26.0'
+      DERIVED_DATA_PATH: build/DerivedData-sim
+      BUILD_RESULTS_PATH: build/TestResults-build-for-testing.xcresult
+      TEST_RESULTS_PATH: build/TestResults-sim.xcresult
+      CI_DIAGNOSTICS_DIR: build/ci-diagnostics
 
     steps:
       - name: Check out repository
@@ -135,11 +139,28 @@ jobs:
       - name: Warm simulator services
         run: xcrun simctl list > /dev/null
 
-      - name: Boot resolved simulator
-        run: |
-          SIMULATOR_UDID="$(bash scripts/resolve-simulator-udid.sh "$SIMULATOR_NAME" "$SIMULATOR_OS")"
-          xcrun simctl boot "$SIMULATOR_UDID" >/dev/null 2>&1 || true
-          bash scripts/wait-for-simulator-boot.sh "$SIMULATOR_UDID" 180
+      - name: Prepare simulator and Swift CI context
+        run: bash scripts/run-swift-tests-ci.sh bootstrap
 
-      - name: Run Swift unit and UI tests
-        run: make test-swift
+      - name: Run Swift build-for-testing
+        run: bash scripts/run-swift-tests-ci.sh build-for-testing
+
+      - name: Run Swift tests without building
+        timeout-minutes: 35
+        run: bash scripts/run-swift-tests-ci.sh test-without-building
+
+      - name: Collect Swift test diagnostics
+        if: ${{ always() }}
+        run: bash scripts/run-swift-tests-ci.sh diagnostics
+
+      - name: Upload Swift test artifacts
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: swift-test-artifacts-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: ignore
+          path: |
+            build/TestResults-build-for-testing.xcresult
+            build/TestResults-sim.xcresult
+            build/DerivedData-sim/Logs/Test
+            build/ci-diagnostics
