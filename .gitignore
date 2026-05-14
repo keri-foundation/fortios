@@ -33,3 +33,6 @@ __pycache__/
 # IDE
 .sourcekit-lsp/
 *.swp
+
+# Kotlin bridge constants for Fort-android are generated locally as needed.
+generated/BridgeContract.kt

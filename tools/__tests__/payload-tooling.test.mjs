@@ -11,6 +11,7 @@ const testDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(testDir, '..', '..');
 const assertNoProofDemoShellScript = path.join(repoRoot, 'tools', 'assert-no-proof-demo-shell.mjs');
 const validateMobilePayloadScript = path.join(repoRoot, 'tools', 'validate-mobile-payload.mjs');
+const validatePyodideRuntimeScript = path.join(repoRoot, 'tools', 'validate-pyodide-runtime.mjs');
 const fortwebManifestScript = path.join(repoRoot, 'tools', 'gen-fortweb-bundle-manifest.mjs');
 const tempDirs = [];
 
@@ -148,6 +149,51 @@ describe('assert-no-proof-demo-shell.mjs', () => {
         const error = await runNodeScriptExpectFailure(assertNoProofDemoShellScript, ['--root', repoDir]);
         expect(error.stdout).toContain('PAYLOAD_SOURCE=fort-ios');
         expect(error.stdout).toContain('FortWeb product-shell payload');
+    });
+});
+
+describe('validate-pyodide-runtime.mjs', () => {
+    it('passes for a module worker paired with an ESM pyodide asset', async () => {
+        const payloadDir = await makeTempDir();
+        const workerPath = path.join(payloadDir, 'pyodide_worker.ts');
+        const assetPath = path.join(payloadDir, 'pyodide.mjs');
+
+        await writeTextFile(
+            workerPath,
+            "const pyodideModule = await import('./pyodide.mjs');\nexport const load = pyodideModule.loadPyodide;\n"
+        );
+        await writeTextFile(assetPath, 'export function loadPyodide() { return true; }\n');
+
+        const { stdout } = await runNodeScript(validatePyodideRuntimeScript, [
+            '--worker',
+            workerPath,
+            '--asset',
+            assetPath,
+        ]);
+
+        expect(stdout).toContain('[pyodide-check] detected worker mode: module');
+        expect(stdout).toContain('[pyodide-check] detected pyodide asset mode: esm');
+        expect(stdout).toContain('[pyodide-check] result: PASS');
+    });
+
+    it('fails for a classic worker paired with an ESM pyodide asset', async () => {
+        const payloadDir = await makeTempDir();
+        const workerPath = path.join(payloadDir, 'pyodide_worker.ts');
+        const assetPath = path.join(payloadDir, 'pyodide.js');
+
+        await writeTextFile(workerPath, "importScripts('./pyodide.js');\n");
+        await writeTextFile(assetPath, 'export function loadPyodide() { return true; }\n');
+
+        const error = await runNodeScriptExpectFailure(validatePyodideRuntimeScript, [
+            '--worker',
+            workerPath,
+            '--asset',
+            assetPath,
+        ]);
+
+        expect(error.stdout).toContain('[pyodide-check] detected worker mode: classic');
+        expect(error.stdout).toContain('[pyodide-check] detected pyodide asset mode: esm');
+        expect(error.stdout).toContain('[pyodide-check] result: FAIL');
     });
 });
 

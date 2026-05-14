@@ -103,8 +103,12 @@ jobs:
 
   swift-tests:
     runs-on: macos-15
+    timeout-minutes: 20
     env:
+      DEVELOPER_DIR: /Applications/Xcode_26.0.1.app/Contents/Developer
       FORTWEB_DIR: ${{ github.workspace }}/.deps/fortweb
+      SIMULATOR_NAME: 'iPhone 17 Pro'
+      SIMULATOR_OS: '26.0'
 
     steps:
       - name: Check out repository
@@ -127,6 +131,15 @@ jobs:
 
       - name: Enforce wrapper payload contract
         run: make payload-contract
+
+      - name: Warm simulator services
+        run: xcrun simctl list > /dev/null
+
+      - name: Boot resolved simulator
+        run: |
+          SIMULATOR_UDID="$(bash scripts/resolve-simulator-udid.sh "$SIMULATOR_NAME" "$SIMULATOR_OS")"
+          xcrun simctl boot "$SIMULATOR_UDID" >/dev/null 2>&1 || true
+          bash scripts/wait-for-simulator-boot.sh "$SIMULATOR_UDID" 180
 
       - name: Run Swift unit and UI tests
         run: make test-swift
