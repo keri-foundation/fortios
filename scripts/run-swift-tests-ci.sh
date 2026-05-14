@@ -23,7 +23,11 @@ log_phase() {
 }
 
 ensure_paths() {
-  mkdir -p "$(dirname "${TEST_RESULTS_PATH}")" "${DERIVED_DATA_PATH}" "${CI_DIAGNOSTICS_DIR}"
+  mkdir -p \
+    "$(dirname "${TEST_RESULTS_PATH}")" \
+    "$(dirname "${BUILD_RESULTS_PATH}")" \
+    "${DERIVED_DATA_PATH}" \
+    "${CI_DIAGNOSTICS_DIR}"
 }
 
 write_github_env() {

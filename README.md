@@ -156,7 +156,7 @@ These are invoked internally by `make` targets. Use `make` for day-to-day work.
 | `npm run dev` | `vite` | Local dev server. iOS wrapper always loads bundled assets — not used in app. |
 | `npm run build` | `vite build` (+ pre-build contract generation) | Browser validation harness build. |
 | `npm run build:ci` | contract gen → `vite build` → manifest gen | Deterministic browser validation harness build. Writes `dist/build-manifest.json`. |
-| `npm run bridge:check` | `gen-bridge-contract.mjs --check` | Fails if generated contract differs from committed `bridge-contract.json`. |
+| `npm run bridge:check` | `gen-bridge-contract.mjs` then `git diff --exit-code -- src/bridge-contract.ts xcodeproj/KeriWallet/KeriWallet/BridgeContract.swift` | Regenerates bridge bindings, then fails if the generated TypeScript or Swift bridge files drift from the committed state. |
 | `npm run typecheck` | `tsc --noEmit` | TypeScript type checking only, no output files. |
 | `npm run test` | `vitest run` | Single-pass unit test run. |
 | `npm run test:watch` | `vitest` | Watch mode for local development. |
