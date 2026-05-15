@@ -9,9 +9,147 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PAYLOAD_SOURCE="${PAYLOAD_SOURCE:-fortweb}"
 FORTWEB_DIR="${FORTWEB_DIR:-${SCRIPT_DIR}/../fortweb}"
+FORTWEB_REMOTE="${FORTWEB_REMOTE:-https://github.com/keri-foundation/fortweb.git}"
+FORTWEB_REF="${FORTWEB_REF:-214643f4fa907061334c09c8297c4d1e59f18f45}"
 WRAPPER_PAYLOAD_DIR="${SCRIPT_DIR}/WebPayload"
 FORTWEB_MANIFEST_TOOL="${SCRIPT_DIR}/tools/gen-fortweb-bundle-manifest.mjs"
 PAYLOAD_VALIDATOR="${SCRIPT_DIR}/tools/validate-mobile-payload.mjs"
+
+FETCH_MODE=0
+TEMP_ROOT=""
+FORTWEB_SOURCE_DIR=""
+
+case "${FORTWEB_FETCH:-0}" in
+  1|true|TRUE|yes|YES)
+    FETCH_MODE=1
+    ;;
+  0|false|FALSE|no|NO|"")
+    ;;
+  *)
+    echo "error: unsupported FORTWEB_FETCH=${FORTWEB_FETCH}" 1>&2
+    exit 1
+    ;;
+esac
+
+usage() {
+  cat <<'EOF'
+Usage: ./sync-payload.sh [--fetch] [--ref <commit-or-tag-or-branch>] [--remote <git-url>] [--fortweb-dir <path>]
+
+Defaults to a sibling FortWeb checkout at ../fortweb.
+
+Options:
+  --fetch                 Download a temporary FortWeb checkout instead of using ../fortweb.
+  --ref <ref>             Commit, tag, or branch to fetch when --fetch is used.
+                          Default: 214643f4fa907061334c09c8297c4d1e59f18f45.
+  --remote <git-url>      Git remote used with --fetch.
+  --fortweb-dir <path>    Explicit local FortWeb checkout path.
+  --help                  Show this message.
+EOF
+}
+
+cleanup() {
+  if [[ -n "${TEMP_ROOT}" && -d "${TEMP_ROOT}" ]]; then
+    rm -rf "${TEMP_ROOT}"
+  fi
+}
+
+trap cleanup EXIT
+
+require_option_value() {
+  local option_name="$1"
+
+  if [[ $# -lt 2 || -z "${2-}" ]]; then
+    echo "error: ${option_name} requires a value" 1>&2
+    usage 1>&2
+    exit 1
+  fi
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --fetch)
+      FETCH_MODE=1
+      ;;
+    --ref)
+      require_option_value "$1" "${2-}"
+      FORTWEB_REF="$2"
+      shift
+      ;;
+    --remote)
+      require_option_value "$1" "${2-}"
+      FORTWEB_REMOTE="$2"
+      shift
+      ;;
+    --fortweb-dir)
+      require_option_value "$1" "${2-}"
+      FORTWEB_DIR="$2"
+      shift
+      ;;
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "error: unknown argument: $1" 1>&2
+      usage 1>&2
+      exit 1
+      ;;
+  esac
+  shift
+done
+
+require_file() {
+  local file_path="$1"
+  local label="$2"
+
+  if [[ ! -f "${file_path}" ]]; then
+    echo "error: ${label} missing at ${file_path}" 1>&2
+    exit 1
+  fi
+}
+
+require_dir() {
+  local dir_path="$1"
+  local label="$2"
+
+  if [[ ! -d "${dir_path}" ]]; then
+    echo "error: ${label} missing at ${dir_path}" 1>&2
+    exit 1
+  fi
+}
+
+resolve_fortweb_source() {
+  if [[ "${FETCH_MODE}" -eq 1 ]]; then
+    if ! command -v git >/dev/null 2>&1; then
+      echo "error: git is required for --fetch mode" 1>&2
+      exit 1
+    fi
+
+    TEMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/fortweb-fetch.XXXXXX")"
+    FORTWEB_SOURCE_DIR="${TEMP_ROOT}/fortweb"
+
+    echo "[sync-payload] fetching FortWeb ref=${FORTWEB_REF} from ${FORTWEB_REMOTE}"
+    mkdir -p "${FORTWEB_SOURCE_DIR}"
+    git -C "${FORTWEB_SOURCE_DIR}" init >/dev/null 2>&1
+    git -C "${FORTWEB_SOURCE_DIR}" remote add origin "${FORTWEB_REMOTE}" >/dev/null 2>&1 || true
+    if ! git -C "${FORTWEB_SOURCE_DIR}" fetch --depth 1 origin "${FORTWEB_REF}" >/dev/null 2>&1; then
+      echo "error: failed to fetch FortWeb remote ${FORTWEB_REMOTE} at ref ${FORTWEB_REF}" 1>&2
+      echo "       Use a valid commit, tag, or branch with --ref, or point to a local checkout with --fortweb-dir." 1>&2
+      exit 1
+    fi
+    git -C "${FORTWEB_SOURCE_DIR}" checkout --detach FETCH_HEAD >/dev/null 2>&1
+    return
+  fi
+
+  if [[ -d "${FORTWEB_DIR}" ]]; then
+    FORTWEB_SOURCE_DIR="${FORTWEB_DIR}"
+    return
+  fi
+
+  echo "error: FortWeb repo not found at ${FORTWEB_DIR}" 1>&2
+  echo "       Run './sync-payload.sh --fetch --ref ${FORTWEB_REF}' to fetch a temporary payload source." 1>&2
+  exit 1
+}
 
 write_fortweb_redirect() {
   cat > "${WRAPPER_PAYLOAD_DIR}/index.html" <<'EOF'
@@ -31,46 +169,34 @@ EOF
 }
 
 write_fortweb_manifest() {
+  local build_command='PAYLOAD_SOURCE=fortweb ./sync-payload.sh'
+
+  if [[ "${FETCH_MODE}" -eq 1 ]]; then
+    build_command="PAYLOAD_SOURCE=fortweb FORTWEB_FETCH=1 FORTWEB_REF=${FORTWEB_REF} FORTWEB_REMOTE=${FORTWEB_REMOTE} ./sync-payload.sh"
+  fi
+
   node "${FORTWEB_MANIFEST_TOOL}" \
     --payload-root "${WRAPPER_PAYLOAD_DIR}" \
-    --fortweb-dir "${FORTWEB_DIR}" \
-    --build-command 'PAYLOAD_SOURCE=fortweb ./sync-payload.sh'
+    --fortweb-dir "${FORTWEB_SOURCE_DIR}" \
+    --build-command "${build_command}"
 }
 
 sync_fortweb_payload() {
-  if [[ ! -d "${FORTWEB_DIR}" ]]; then
-    echo "error: FortWeb repo not found at ${FORTWEB_DIR}" 1>&2
-    exit 1
-  fi
+  resolve_fortweb_source
 
-  if [[ ! -f "${FORTWEB_DIR}/app/index.html" ]]; then
-    echo "error: FortWeb app/index.html missing at ${FORTWEB_DIR}/app/index.html" 1>&2
-    exit 1
-  fi
-
-  if [[ ! -f "${FORTWEB_DIR}/pyscript-ci.toml" ]]; then
-    echo "error: FortWeb pyscript-ci.toml missing at ${FORTWEB_DIR}/pyscript-ci.toml" 1>&2
-    exit 1
-  fi
-
-  if [[ ! -d "${FORTWEB_DIR}/vendor" ]]; then
-    echo "error: FortWeb vendor directory missing at ${FORTWEB_DIR}/vendor" 1>&2
-    exit 1
-  fi
-
-  if [[ ! -d "${FORTWEB_DIR}/wheels" ]]; then
-    echo "error: FortWeb wheels directory missing at ${FORTWEB_DIR}/wheels" 1>&2
-    exit 1
-  fi
+  require_file "${FORTWEB_SOURCE_DIR}/app/index.html" "FortWeb app/index.html"
+  require_file "${FORTWEB_SOURCE_DIR}/pyscript-ci.toml" "FortWeb pyscript-ci.toml"
+  require_dir "${FORTWEB_SOURCE_DIR}/vendor" "FortWeb vendor directory"
+  require_dir "${FORTWEB_SOURCE_DIR}/wheels" "FortWeb wheels directory"
 
   echo "[sync-payload] syncing FortWeb payload into wrapper WebPayload/"
   mkdir -p "${WRAPPER_PAYLOAD_DIR}"
   rm -rf "${WRAPPER_PAYLOAD_DIR}"/*
   mkdir -p "${WRAPPER_PAYLOAD_DIR}/fortweb"
-  cp -R "${FORTWEB_DIR}/app" "${WRAPPER_PAYLOAD_DIR}/fortweb/app"
-  cp -R "${FORTWEB_DIR}/vendor" "${WRAPPER_PAYLOAD_DIR}/fortweb/vendor"
-  cp -R "${FORTWEB_DIR}/wheels" "${WRAPPER_PAYLOAD_DIR}/fortweb/wheels"
-  cp "${FORTWEB_DIR}/pyscript-ci.toml" "${WRAPPER_PAYLOAD_DIR}/fortweb/pyscript-ci.toml"
+  cp -R "${FORTWEB_SOURCE_DIR}/app" "${WRAPPER_PAYLOAD_DIR}/fortweb/app"
+  cp -R "${FORTWEB_SOURCE_DIR}/vendor" "${WRAPPER_PAYLOAD_DIR}/fortweb/vendor"
+  cp -R "${FORTWEB_SOURCE_DIR}/wheels" "${WRAPPER_PAYLOAD_DIR}/fortweb/wheels"
+  cp "${FORTWEB_SOURCE_DIR}/pyscript-ci.toml" "${WRAPPER_PAYLOAD_DIR}/fortweb/pyscript-ci.toml"
   write_fortweb_redirect
   write_fortweb_manifest
 }
@@ -110,4 +236,10 @@ with open(sys.argv[1], 'r', encoding='utf-8') as fp:
 PY
 )
 
-echo "[sync-payload] ok: source=${PAYLOAD_SOURCE} files=${FILE_COUNT} dist_tree_sha256=${DIST_HASH}"
+if [[ "${FETCH_MODE}" -eq 1 ]]; then
+  SOURCE_LABEL="fetch:${FORTWEB_REMOTE}@${FORTWEB_REF}"
+else
+  SOURCE_LABEL="local:${FORTWEB_SOURCE_DIR}"
+fi
+
+echo "[sync-payload] ok: source=${SOURCE_LABEL} files=${FILE_COUNT} dist_tree_sha256=${DIST_HASH}"

@@ -8,6 +8,7 @@ on:
     paths:
       - '.github/workflows/ios-security.yml'
       - '.github/workflows/ios-pyodide-slow.yml'
+      - 'scripts/**'
       - '.tool-versions'
       - 'Makefile'
       - 'README.md'
@@ -34,6 +35,7 @@ on:
     paths:
       - '.github/workflows/ios-security.yml'
       - '.github/workflows/ios-pyodide-slow.yml'
+      - 'scripts/**'
       - '.tool-versions'
       - 'Makefile'
       - 'README.md'
@@ -103,8 +105,18 @@ jobs:
 
   swift-tests:
     runs-on: macos-15
+    timeout-minutes: 60
     env:
+      DEVELOPER_DIR: /Applications/Xcode_26.0.1.app/Contents/Developer
       FORTWEB_DIR: ${{ github.workspace }}/.deps/fortweb
+      SIMULATOR_NAME: 'iPhone 17 Pro'
+      SIMULATOR_OS: '26.0'
+      SIMULATOR_DESTINATION_ARCH: 'arm64'
+      SWIFT_TEST_WITHOUT_BUILDING_TIMEOUT_SECONDS: '1800'
+      DERIVED_DATA_PATH: build/DerivedData-sim
+      BUILD_RESULTS_PATH: build/TestResults-build-for-testing.xcresult
+      TEST_RESULTS_PATH: build/TestResults-sim.xcresult
+      CI_DIAGNOSTICS_DIR: build/ci-diagnostics
 
     steps:
       - name: Check out repository
@@ -128,5 +140,31 @@ jobs:
       - name: Enforce wrapper payload contract
         run: make payload-contract
 
-      - name: Run Swift unit and UI tests
-        run: make test-swift
+      - name: Warm simulator services
+        run: xcrun simctl list > /dev/null
+
+      - name: Prepare simulator and Swift CI context
+        run: bash scripts/run-swift-tests-ci.sh bootstrap
+
+      - name: Run Swift build-for-testing
+        run: bash scripts/run-swift-tests-ci.sh build-for-testing
+
+      - name: Run Swift tests without building
+        timeout-minutes: 35
+        run: bash scripts/run-swift-tests-ci.sh test-without-building
+
+      - name: Collect Swift test diagnostics
+        if: ${{ always() }}
+        run: bash scripts/run-swift-tests-ci.sh diagnostics
+
+      - name: Upload Swift test artifacts
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: swift-test-artifacts-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: ignore
+          path: |
+            build/TestResults-build-for-testing.xcresult
+            build/TestResults-sim.xcresult
+            build/DerivedData-sim/Logs/Test
+            build/ci-diagnostics

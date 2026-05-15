@@ -51,9 +51,8 @@ The browser validation harness is non-shipped. The app bundle must stage and ser
 Pyodide currently ships Python **3.13**. Any Python code loaded in the web payload
 (via `runPythonAsync`) must be compatible with 3.13 — do not use Python 3.14-only
 features until Pyodide releases a 3.14 build. This applies regardless of what
-keripy uses on the server side. See the
-[2026-02-24 meeting](docs/meetings/raw-transcripts/2026-02/2026-02-24-pt-3.md)
-for Sam's directive on this constraint.
+keripy uses on the server side. See the 2026-02-24 KERI Foundation dev meeting
+(workspace docs) for Sam's directive on this constraint.
 
 ---
 
@@ -89,6 +88,9 @@ make sync                       # default: FortWeb convergence path
 make sync-fortweb              # explicit alias for the same FortWeb path
 make payload-contract
 
+# Optional: stage a deterministic FortWeb ref instead of mutable local ../fortweb
+PAYLOAD_SOURCE=fortweb FORTWEB_FETCH=1 FORTWEB_REF=214643f4fa907061334c09c8297c4d1e59f18f45 make payload-contract
+
 # 3. Run the fast local checks
 make lint                      # SwiftLint (Swift sources)
 make lint-ts                   # tsc --noEmit (TypeScript)
@@ -108,7 +110,17 @@ make logs-sim
 make logs-device DEVICE_REF=<udid-or-name>
 ```
 
-For conference acceptance and simulator/device parity runs, use [CONFERENCE-IOS-VALIDATION-CHECKLIST.md](libs/Fort-ios/CONFERENCE-IOS-VALIDATION-CHECKLIST.md).
+### Known-good baseline
+
+For review and debug runs, use deterministic FortWeb ref staging and treat [KNOWN-GOOD-IOS-BASELINE.md](KNOWN-GOOD-IOS-BASELINE.md) as the source of truth for the current known-good tuple.
+
+```sh
+PAYLOAD_SOURCE=fortweb FORTWEB_FETCH=1 FORTWEB_REF=214643f4fa907061334c09c8297c4d1e59f18f45 make payload-contract
+```
+
+Do not use dirty local FortWeb HEAD or hand-edited `WebPayload/` as review evidence.
+
+For conference acceptance and simulator/device parity runs, use [CONFERENCE-IOS-VALIDATION-CHECKLIST.md](CONFERENCE-IOS-VALIDATION-CHECKLIST.md).
 
 Run `make help` at any time to list all available targets.
 
@@ -157,7 +169,7 @@ These are invoked internally by `make` targets. Use `make` for day-to-day work.
 | `npm run dev` | `vite` | Local dev server. iOS wrapper always loads bundled assets — not used in app. |
 | `npm run build` | `vite build` (+ pre-build contract generation) | Browser validation harness build. |
 | `npm run build:ci` | contract gen → `vite build` → manifest gen | Deterministic browser validation harness build. Writes `dist/build-manifest.json`. |
-| `npm run bridge:check` | `gen-bridge-contract.mjs --check` | Fails if generated contract differs from committed `bridge-contract.json`. |
+| `npm run bridge:check` | `gen-bridge-contract.mjs` then `git diff --exit-code -- src/bridge-contract.ts xcodeproj/KeriWallet/KeriWallet/BridgeContract.swift` | Regenerates bridge bindings, then fails if the generated TypeScript or Swift bridge files drift from the committed state. |
 | `npm run typecheck` | `tsc --noEmit` | TypeScript type checking only, no output files. |
 | `npm run test` | `vitest run` | Single-pass unit test run. |
 | `npm run test:watch` | `vitest` | Watch mode for local development. |
@@ -190,6 +202,8 @@ The pipeline is split into two scripts:
 3. Writes a FortWeb product-shell build manifest.
 4. Validates the staged payload contract before returning.
 
+For deterministic staging, set `FORTWEB_FETCH=1` and `FORTWEB_REF=<commit-or-tag-or-branch>` so the script fetches a temporary FortWeb checkout instead of consuming mutable local `../fortweb` state.
+
 > **Rule:** Always run the appropriate sync target after changing payload source files. Never manually edit `WebPayload/`.
 
 ### Determinism contract
@@ -203,7 +217,7 @@ The pipeline is split into two scripts:
 
 ## 7. Testing
 
-Fort-ios uses a three-layer test pyramid. See [ADR-030](docs/adr/ADR-030-ios-ts-testing-architecture.md) for the full rationale.
+Fort-ios uses a three-layer test pyramid. See ADR-030 in the workspace docs for the full rationale.
 
 ### Layer 1 — Swift unit tests (swift-testing)
 
@@ -257,10 +271,10 @@ make test-all   # test-swift + test-ts + test-e2e
 The JS↔native bridge is governed by a typed contract so all sides stay in sync.
 
 - **Source of truth:** `bridge-contract.json` (committed)
-- **Generated:** `src/bridge-contract.ts` (TypeScript), `KeriWallet/BridgeContract.swift` (Swift), and `generated/BridgeContract.kt` (Kotlin for Fort-android)
-- **Verify sync:** `make bridge-check` (exits non-zero if generated output differs from committed JSON)
+- **Generated:** `src/bridge-contract.ts` (TypeScript), `KeriWallet/BridgeContract.swift` (Swift), and `generated/BridgeContract.kt` (Kotlin for Fort-android, generated locally when needed)
+- **Verify sync:** `make bridge-check` regenerates all outputs, then fails if the tracked TypeScript or Swift contract files drift from committed JSON
 
-The `prebuild` npm hook regenerates both files automatically before every build. In CI, `make bridge-check` must pass before tests run.
+The `prebuild` npm hook regenerates all contract outputs automatically before every build. In CI, `make bridge-check` must pass before tests run.
 
 Message envelope shape (JS → Swift):
 
@@ -282,7 +296,7 @@ Fort-ios/
 │   ├── bridge-contract.ts      # Generated — do not edit by hand
 │   └── __tests__/              # Vitest unit tests
 ├── generated/
-│   └── BridgeContract.kt       # Generated Kotlin constants (for Fort-android)
+│   └── BridgeContract.kt       # Generated Kotlin constants (for Fort-android, not committed)
 ├── public/
 │   └── pyodide/                # Gitignored — populated by `make pyodide`
 ├── playwright/
@@ -344,19 +358,22 @@ Fort-ios/
 
 ### Workspace instructions
 
+These files live in the keri-notes workspace, not in this repo.
+
 | File | Covers |
 |------|--------|
-| [.github/instructions/ios-swift-coding.instructions.md](.github/instructions/ios-swift-coding.instructions.md) | Swift style, naming, DI patterns, testing with swift-testing |
-| [.github/instructions/ios-xcode-workflow.instructions.md](.github/instructions/ios-xcode-workflow.instructions.md) | Xcode build/CI workflow, anti-patterns catalog, `xcodebuild` reference |
-| [.github/instructions/ios-wkwebview-pyodide-bundled-payload.instructions.md](.github/instructions/ios-wkwebview-pyodide-bundled-payload.instructions.md) | WKWebView rules, scheme handler, worker architecture, telemetry bridge |
-| [.github/instructions/pyodide-config.instructions.md](.github/instructions/pyodide-config.instructions.md) | Pyodide version, wheel sources, `unpackArchive` install pattern |
-| [.github/instructions/pyodide-event-loop.instructions.md](.github/instructions/pyodide-event-loop.instructions.md) | Asyncio event loop inside Pyodide WASM |
-| [.github/instructions/pyodide-js-bridge.instructions.md](.github/instructions/pyodide-js-bridge.instructions.md) | Python↔JavaScript data passing via Pyodide proxy objects |
+| `.github/instructions/ios-swift-coding.instructions.md` | Swift style, naming, DI patterns, testing with swift-testing |
+| `.github/instructions/ios-xcode-workflow.instructions.md` | Xcode build/CI workflow, anti-patterns catalog, `xcodebuild` reference |
+| `.github/instructions/ios-wkwebview-pyodide-bundled-payload.instructions.md` | WKWebView rules, scheme handler, worker architecture, telemetry bridge |
+| `.github/instructions/pyodide-config.instructions.md` | Pyodide version, wheel sources, `unpackArchive` install pattern |
+| `.github/instructions/pyodide-event-loop.instructions.md` | Asyncio event loop inside Pyodide WASM |
+| `.github/instructions/pyodide-js-bridge.instructions.md` | Python↔JavaScript data passing via Pyodide proxy objects |
 
 ### Conference validation
 
 | File | Purpose |
 |------|---------|
+| [KNOWN-GOOD-IOS-BASELINE.md](KNOWN-GOOD-IOS-BASELINE.md) | Frozen Fort-ios wrapper + payload + simulator tuple for regression restore and reviewable evidence |
 | [CONFERENCE-IOS-VALIDATION-CHECKLIST.md](CONFERENCE-IOS-VALIDATION-CHECKLIST.md) | End-to-end simulator and physical-device validation script for conference acceptance |
 
 ---
