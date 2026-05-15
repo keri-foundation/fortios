@@ -111,6 +111,8 @@ jobs:
       FORTWEB_DIR: ${{ github.workspace }}/.deps/fortweb
       SIMULATOR_NAME: 'iPhone 17 Pro'
       SIMULATOR_OS: '26.0'
+      SIMULATOR_DESTINATION_ARCH: 'arm64'
+      SWIFT_TEST_WITHOUT_BUILDING_TIMEOUT_SECONDS: '1800'
       DERIVED_DATA_PATH: build/DerivedData-sim
       BUILD_RESULTS_PATH: build/TestResults-build-for-testing.xcresult
       TEST_RESULTS_PATH: build/TestResults-sim.xcresult
