@@ -84,13 +84,26 @@ final class WebBridge: NSObject, WKScriptMessageHandler {
         "ready"
     ]
 
+    private static let maxLoggedMessageLength = 512
+    private static let maxLoggedStackLength = 1024
+
     static func logDisposition(for envelope: WebBridgeEnvelope) -> BridgeLogDisposition {
         switch envelope.type {
         case .jsError, .unhandledRejection:
-            return BridgeLogDisposition(
-                level: .error,
-                message: "[WebBridge] \(envelope.type.rawValue): \(envelope.message)")
+            return javaScriptErrorDisposition(for: envelope)
         case .log:
+            if envelope.message.hasPrefix("[storage_canary]") {
+                return storageCanaryDisposition(for: envelope.message)
+            }
+
+            if envelope.message.hasPrefix("worker.error") {
+                return workerDisposition(label: "worker.error", message: envelope.message)
+            }
+
+            if envelope.message.hasPrefix("worker.messageerror") {
+                return workerDisposition(label: "worker.messageerror", message: envelope.message)
+            }
+
             if let diagnostic = FortWebRuntimeDiagnostic.parse(envelope.message) {
                 return logDisposition(for: diagnostic, originalMessage: envelope.message)
             }
@@ -170,6 +183,88 @@ final class WebBridge: NSObject, WKScriptMessageHandler {
         return BridgeLogDisposition(
             level: .info,
             message: "[WebBridge] runtime: \(originalMessage)")
+    }
+
+    private static func storageCanaryDisposition(for message: String) -> BridgeLogDisposition {
+        if message.contains(".error") {
+            return BridgeLogDisposition(
+                level: .error,
+                message: "[WebBridge] \(message)")
+        }
+
+        return BridgeLogDisposition(
+            level: .notice,
+            message: "[WebBridge] \(message)")
+    }
+
+    private static func javaScriptErrorDisposition(for envelope: WebBridgeEnvelope)
+        -> BridgeLogDisposition
+    {
+        let label = envelope.type == .jsError
+            ? "js_error.window" : "js_error.unhandled_rejection"
+        var fields: [String: String] = [
+            "event_type": envelope.type.rawValue,
+            "message": truncated(envelope.message, maxLength: maxLoggedMessageLength),
+        ]
+
+        if let source = envelope.source, !source.isEmpty {
+            fields["source"] = source
+        }
+
+        if let line = envelope.line {
+            fields["line"] = String(line)
+        }
+
+        if let column = envelope.col {
+            fields["column"] = String(column)
+        }
+
+        if let stack = envelope.stack, !stack.isEmpty {
+            let truncatedStack = truncated(stack, maxLength: maxLoggedStackLength)
+            fields["stack"] = truncatedStack
+            if truncatedStack != stack {
+                fields["stack_truncated"] = "true"
+            }
+        }
+
+        return BridgeLogDisposition(
+            level: .error,
+            message: "[WebBridge] \(label) \(formattedFields(fields))")
+    }
+
+    private static func workerDisposition(label: String, message: String) -> BridgeLogDisposition {
+        let fields = formattedFields([
+            "event_type": label,
+            "message": truncated(message, maxLength: maxLoggedMessageLength),
+        ])
+
+        return BridgeLogDisposition(
+            level: .error,
+            message: "[WebBridge] \(label) \(fields)"
+        )
+    }
+
+    private static func formattedFields(_ fields: [String: String]) -> String {
+        fields
+            .filter { !$0.value.isEmpty }
+            .sorted { $0.key < $1.key }
+            .map { key, value in "\(key)=\(quoted(value))" }
+            .joined(separator: " ")
+    }
+
+    private static func truncated(_ value: String, maxLength: Int) -> String {
+        guard value.count > maxLength else {
+            return value
+        }
+
+        return String(value.prefix(maxLength))
+    }
+
+    private static func quoted(_ value: String) -> String {
+        let escapedValue = value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        return "\"\(escapedValue)\""
     }
 
     override init() {

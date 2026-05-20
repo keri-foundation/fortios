@@ -31,6 +31,30 @@ enum AppConfig {
         static let defaultIndexPath = "index.html"
     }
 
+    enum Loopback {
+        static let environmentKey = "FORTIOS_LOOPBACK_ORIGIN"
+        static let launchArgument = "--fortios-loopback-origin"
+        static let scheme = "http"
+        static let host = "127.0.0.1"
+
+        static var isEnabled: Bool {
+            #if DEBUG
+                let environment = ProcessInfo.processInfo.environment
+                if let flag = environment[environmentKey]?.lowercased(),
+                    ["1", "true", "yes"].contains(flag)
+                {
+                    return true
+                }
+
+                let arguments = ProcessInfo.processInfo.arguments
+                return arguments.contains(launchArgument)
+                    || arguments.contains("\(environmentKey)=1")
+            #else
+                return false
+            #endif
+        }
+    }
+
     // MARK: - JS ↔ Swift Bridge
 
     enum Bridge {
@@ -112,6 +136,7 @@ enum AppConfig {
         static let webBridge = "WebBridge"
         static let webContainer = "WebContainer"
         static let webNav = "WebNav"
+        static let loopback = "WebContainer"
     }
 
     // MARK: - Brand Colors

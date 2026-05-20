@@ -9,6 +9,13 @@ enum PayloadSchemeError: Error {
     case resourceTooLarge
 }
 
+private struct PayloadResourceLoadResult {
+    let data: Data
+    let mime: String
+    let headers: [String: String]
+    let normalizedPath: String
+}
+
 final class PayloadSchemeHandler: NSObject, WKURLSchemeHandler {
     private let maxBytes: Int
     /// Overrides the default Bundle.main-derived payload directory. Inject a
@@ -35,46 +42,67 @@ final class PayloadSchemeHandler: NSObject, WKURLSchemeHandler {
     }
 
     func webView(_ webView: WKWebView, start urlSchemeTask: WKURLSchemeTask) {
+        let requestID = String(UUID().uuidString.prefix(8)).lowercased()
+        let startedAt = Date()
+
         guard let url = urlSchemeTask.request.url else {
-            AppLogger.error("[SchemeHandler] no URL on task", category: AppConfig.Log.schemeHandler)
+            logRequestError(
+                requestID: requestID,
+                startedAt: startedAt,
+                errorKind: "invalid_url",
+                errorDescription: String(describing: PayloadSchemeError.invalidURL))
             urlSchemeTask.didFailWithError(PayloadSchemeError.invalidURL)
             return
         }
 
         let requestPath = requestPath(for: url)
-        if isInitialDocumentPath(requestPath) {
-            AppLogger.notice(
-                "[SchemeHandler] start initial document path=\(requestPath)",
-                category: AppConfig.Log.schemeHandler)
-        } else {
-            AppLogger.debug(
-                "[SchemeHandler] start path=\(requestPath)",
-                category: AppConfig.Log.schemeHandler)
-        }
+
+        logRequestStart(requestID: requestID, url: url, requestPath: requestPath)
 
         do {
-
-            let (data, _, headers) = try loadResource(for: url)
+            let result = try loadResourceDetails(for: url)
 
             guard
                 let response = HTTPURLResponse(
                     url: url,
                     statusCode: 200,
                     httpVersion: AppConfig.HTTP.version,
-                    headerFields: headers
+                    headerFields: result.headers
                 )
             else {
+                logRequestError(
+                    requestID: requestID,
+                    startedAt: startedAt,
+                    url: url,
+                    requestPath: requestPath,
+                    normalizedPath: nil,
+                    errorKind: "response_construction_failed",
+                    errorDescription: String(describing: PayloadSchemeError.missingResource))
                 urlSchemeTask.didFailWithError(PayloadSchemeError.missingResource)
                 return
             }
 
             urlSchemeTask.didReceive(response)
-            urlSchemeTask.didReceive(data)
+            urlSchemeTask.didReceive(result.data)
             urlSchemeTask.didFinish()
+
+            logRequestSuccess(
+                requestID: requestID,
+                startedAt: startedAt,
+                url: url,
+                requestPath: requestPath,
+                result: result,
+                statusCode: response.statusCode)
         } catch {
-            AppLogger.warning(
-                "[SchemeHandler] failed path=\(requestPath) error=\(String(describing: error))",
-                category: AppConfig.Log.schemeHandler)
+            let normalizedPath = normalizedPathIfAvailable(from: error, url: url)
+            logRequestError(
+                requestID: requestID,
+                startedAt: startedAt,
+                url: url,
+                requestPath: requestPath,
+                normalizedPath: normalizedPath,
+                errorKind: errorKind(for: error),
+                errorDescription: String(describing: error))
             urlSchemeTask.didFailWithError(error)
         }
     }
@@ -87,6 +115,11 @@ final class PayloadSchemeHandler: NSObject, WKURLSchemeHandler {
     /// can exercise the full request-handling logic without requiring a live
     /// `WKURLSchemeTask`. Production callers use the `WKURLSchemeHandler` protocol.
     func loadResource(for url: URL) throws -> (Data, String, [String: String]) {
+        let result = try loadResourceDetails(for: url)
+        return (result.data, result.mime, result.headers)
+    }
+
+    private func loadResourceDetails(for url: URL) throws -> PayloadResourceLoadResult {
         guard url.scheme?.lowercased() == AppConfig.Scheme.name else {
             throw PayloadSchemeError.invalidURL
         }
@@ -123,16 +156,12 @@ final class PayloadSchemeHandler: NSObject, WKURLSchemeHandler {
         for (key, value) in AppConfig.HTTP.crossOriginHeaders {
             allHeaders[key] = value
         }
-        if isInitialDocumentPath(relPath) {
-            AppLogger.notice(
-                "[SchemeHandler] served initial document path=\(relPath) bytes=\(data.count)",
-                category: AppConfig.Log.schemeHandler)
-        } else {
-            AppLogger.debug(
-                "[SchemeHandler] served path=\(relPath) mime=\(mime) bytes=\(data.count)",
-                category: AppConfig.Log.schemeHandler)
-        }
-        return (data, mime, allHeaders)
+
+        return PayloadResourceLoadResult(
+            data: data,
+            mime: mime,
+            headers: allHeaders,
+            normalizedPath: relPath)
     }
 
     private func validatePayloadManifestIfNeeded(baseURL: URL) throws {
@@ -187,5 +216,145 @@ final class PayloadSchemeHandler: NSObject, WKURLSchemeHandler {
     private func isInitialDocumentPath(_ path: String) -> Bool {
         path == "/" || path == AppConfig.Scheme.defaultIndexPath
             || path == "/\(AppConfig.Scheme.defaultIndexPath)"
+    }
+
+    private func normalizedPathIfAvailable(from error: Error, url: URL) -> String? {
+        try? normalizedRelativePath(urlPath: url.path)
+    }
+
+    private func logRequestStart(requestID: String, url: URL, requestPath: String) {
+        logRequest(
+            levelForPath(requestPath),
+            label: "scheme_handler.request.start",
+            fields: [
+                "request_id": requestID,
+                "url": url.absoluteString,
+                "scheme": url.scheme ?? "",
+                "host": url.host ?? "",
+                "path": requestPath,
+            ])
+    }
+
+    private func logRequestSuccess(
+        requestID: String,
+        startedAt: Date,
+        url: URL,
+        requestPath: String,
+        result: PayloadResourceLoadResult,
+        statusCode: Int
+    ) {
+        logRequest(
+            levelForPath(requestPath),
+            label: "scheme_handler.request.success",
+            fields: [
+                "request_id": requestID,
+                "url": url.absoluteString,
+                "scheme": url.scheme ?? "",
+                "host": url.host ?? "",
+                "path": requestPath,
+                "normalized_path": result.normalizedPath,
+                "mime": result.mime,
+                "bytes": String(result.data.count),
+                "duration_ms": String(durationMilliseconds(since: startedAt)),
+                "status": String(statusCode),
+                "response_headers": summarizedHeaders(result.headers),
+            ])
+    }
+
+    private func logRequestError(
+        requestID: String,
+        startedAt: Date,
+        url: URL? = nil,
+        requestPath: String? = nil,
+        normalizedPath: String? = nil,
+        errorKind: String,
+        errorDescription: String
+    ) {
+        let path = requestPath ?? url?.path ?? ""
+        logRequest(
+            levelForPath(path),
+            label: "scheme_handler.request.error",
+            fields: [
+                "request_id": requestID,
+                "url": url?.absoluteString ?? "",
+                "scheme": url?.scheme ?? "",
+                "host": url?.host ?? "",
+                "path": path,
+                "normalized_path": normalizedPath ?? "",
+                "duration_ms": String(durationMilliseconds(since: startedAt)),
+                "status": "error",
+                "error_kind": errorKind,
+                "error": errorDescription,
+            ])
+    }
+
+    private func errorKind(for error: Error) -> String {
+        switch error {
+        case PayloadSchemeError.invalidURL:
+            return "invalid_url"
+        case PayloadSchemeError.disallowedPath:
+            return "disallowed_path"
+        case PayloadSchemeError.missingResource:
+            return "missing_resource"
+        case PayloadSchemeError.invalidPayloadManifest:
+            return "invalid_payload_manifest"
+        case PayloadSchemeError.resourceTooLarge:
+            return "resource_too_large"
+        default:
+            return String(describing: type(of: error))
+        }
+    }
+
+    private func durationMilliseconds(since startedAt: Date) -> Int {
+        max(0, Int(Date().timeIntervalSince(startedAt) * 1000))
+    }
+
+    private func summarizedHeaders(_ headers: [String: String]) -> String {
+        let orderedKeys = [
+            "Content-Type",
+            "Content-Length",
+            "Cross-Origin-Opener-Policy",
+            "Cross-Origin-Embedder-Policy",
+            "Cross-Origin-Resource-Policy",
+        ]
+
+        return orderedKeys.compactMap { key in
+            guard let value = headers[key] else { return nil }
+            return "\(key)=\(quoted(value))"
+        }.joined(separator: " ")
+    }
+
+    private func levelForPath(_ path: String) -> LogLevel {
+        isInitialDocumentPath(path) ? .notice : .debug
+    }
+
+    private func logRequest(_ level: LogLevel, label: String, fields: [String: String]) {
+        let message = (["[SchemeHandler]", label] + fields
+            .filter { !$0.value.isEmpty }
+            .sorted { $0.key < $1.key }
+            .map { key, value in "\(key)=\(quoted(value))" })
+            .joined(separator: " ")
+
+        switch level {
+        case .verbose:
+            AppLogger.verbose(message, category: AppConfig.Log.schemeHandler)
+        case .debug:
+            AppLogger.debug(message, category: AppConfig.Log.schemeHandler)
+        case .info:
+            AppLogger.info(message, category: AppConfig.Log.schemeHandler)
+        case .notice:
+            AppLogger.notice(message, category: AppConfig.Log.schemeHandler)
+        case .warning:
+            AppLogger.warning(message, category: AppConfig.Log.schemeHandler)
+        case .error:
+            AppLogger.error(message, category: AppConfig.Log.schemeHandler)
+        }
+    }
+
+    private func quoted(_ value: String) -> String {
+        let escapedValue = value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        return "\"\(escapedValue)\""
     }
 }

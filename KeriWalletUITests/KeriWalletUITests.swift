@@ -8,6 +8,15 @@ final class KeriWalletUITests: XCTestCase {
         super.setUp()
         continueAfterFailure = false
         app = XCUIApplication()
+
+        let environment = ProcessInfo.processInfo.environment
+        if let flag = environment["FORTIOS_LOOPBACK_ORIGIN"]?.lowercased(),
+            ["1", "true", "yes"].contains(flag)
+        {
+            app.launchEnvironment["FORTIOS_LOOPBACK_ORIGIN"] = "1"
+            app.launchArguments.append("--fortios-loopback-origin")
+        }
+
         app.launch()
     }
 
@@ -83,6 +92,79 @@ final class KeriWalletUITests: XCTestCase {
             webView.buttons["Initialize New Vault"].waitForExistence(timeout: 15),
             "FortWeb vault drawer should expose an initialize-new-vault affordance once opened"
         )
+    }
+
+    func test_create_vault_completes_without_stuck_creating_state() {
+        let webView = app.webViews.firstMatch
+        guard webView.waitForExistence(timeout: 30) else {
+            XCTFail("WKWebView did not appear")
+            return
+        }
+
+        let createVaultButton = webView.buttons["Create Vault"]
+        guard createVaultButton.waitForExistence(timeout: 15) else {
+            attachFailureArtifacts(named: "create-vault-entry-missing")
+            XCTFail("Create Vault entry did not appear")
+            return
+        }
+
+        createVaultButton.tap()
+
+        let dialogTitle = webView.staticTexts["Vault Initialization"]
+        guard dialogTitle.waitForExistence(timeout: 10) else {
+            attachFailureArtifacts(named: "create-vault-dialog-missing")
+            XCTFail("Create vault dialog did not appear")
+            return
+        }
+
+        let nameField = webView.textFields["Name"]
+        guard nameField.waitForExistence(timeout: 10) else {
+            attachFailureArtifacts(named: "create-vault-name-missing")
+            XCTFail("Create vault Name field did not appear")
+            return
+        }
+
+        let passcodeField = webView.secureTextFields["Passcode"]
+        guard passcodeField.waitForExistence(timeout: 10) else {
+            attachFailureArtifacts(named: "create-vault-passcode-missing")
+            XCTFail("Create vault Passcode field did not appear")
+            return
+        }
+
+        let alias = "diag-create-\(Int(Date().timeIntervalSince1970))"
+        focusAndType(alias, into: nameField, fieldName: "Name")
+        focusAndType("0123456789abcdefghijk", into: passcodeField, fieldName: "Passcode")
+
+        let submitButton = webView.buttons["Create"]
+        guard submitButton.waitForExistence(timeout: 5) else {
+            attachFailureArtifacts(named: "create-vault-submit-missing")
+            XCTFail("Create vault submit button did not appear")
+            return
+        }
+
+        submitButton.tap()
+
+        let creatingStatus = webView.staticTexts["Creating vault..."]
+        let creatingButton = webView.buttons["Creating..."]
+        let successCandidates = [
+            webView.buttons["Open"],
+            webView.buttons["Open Vault"],
+            webView.links["Identifiers"],
+            webView.links["Settings"],
+            webView.staticTexts["Available Vaults"],
+        ]
+
+        let deadline = Date().addingTimeInterval(30)
+        while Date() < deadline {
+            if successCandidates.contains(where: { $0.exists }) && !creatingStatus.exists && !creatingButton.exists {
+                return
+            }
+
+            RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        }
+
+        attachFailureArtifacts(named: "create-vault-stuck-creating")
+        XCTFail("Create vault remained in a stuck creating state instead of reaching a success surface within 30 seconds")
     }
 
     // MARK: - Vault Open Flow
@@ -227,6 +309,36 @@ final class KeriWalletUITests: XCTestCase {
     /// without depending on there being only one stored vault.
     private func firstOpenVaultButton(in webView: XCUIElement) -> XCUIElement {
         webView.buttons.matching(identifier: "Open Vault").firstMatch
+    }
+
+    private func attachFailureArtifacts(named name: String) {
+        let screenshotAttachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshotAttachment.name = name
+        screenshotAttachment.lifetime = .keepAlways
+        add(screenshotAttachment)
+
+        let treeAttachment = XCTAttachment(string: app.debugDescription)
+        treeAttachment.name = "\(name)-tree"
+        treeAttachment.lifetime = .keepAlways
+        add(treeAttachment)
+    }
+
+    private func focusAndType(_ text: String, into field: XCUIElement, fieldName: String) {
+        let coordinate = field.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        coordinate.tap()
+
+        let keyboard = app.keyboards.firstMatch
+        if !keyboard.waitForExistence(timeout: 2) {
+            coordinate.tap()
+        }
+
+        guard keyboard.waitForExistence(timeout: 5) else {
+            attachFailureArtifacts(named: "\(fieldName)-keyboard-missing")
+            XCTFail("\(fieldName) field did not gain keyboard focus")
+            return
+        }
+
+        app.typeText(text)
     }
 
     /// Attempts to navigate from the vault picker into an unlocked vault.
