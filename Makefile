@@ -31,7 +31,7 @@ SIM_APP_PATH  := $(SIM_DERIVED_DATA)/Build/Products/Debug-iphonesimulator/KeriWa
 DEVICE_APP_PATH := $(DEVICE_DERIVED_DATA)/Build/Products/Debug-iphoneos/KeriWallet.app
 DEVICE_REF    ?=
 
-.PHONY: help setup pyodide sync sync-fortweb payload-contract ios-doctor ios-list-sims ios-list-devices require-simulator require-device-ref focus-sim build build-sim install-sim launch-sim run-sim dev-sim build-device install-device launch-device run-device dev-device parity-smoke logs-sim logs-device test-swift test-ts test-e2e test-e2e-slow test-all bridge-check lint lint-ts open clean archive export upload
+.PHONY: help setup pyodide sync sync-fortweb payload-static-guards payload-contract ios-doctor ios-list-sims ios-list-devices require-simulator require-device-ref focus-sim build build-sim install-sim launch-sim run-sim dev-sim build-device install-device launch-device run-device dev-device parity-smoke logs-sim logs-device test-swift test-ts test-e2e test-e2e-slow test-all bridge-check lint lint-ts open clean archive export upload
 
 help: ## Show available make targets
 	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | \
@@ -70,10 +70,14 @@ sync: ## Stage the shipped FortWeb payload into WebPayload/
 sync-fortweb: ## Explicit alias for the FortWeb wrapper staging path
 	PAYLOAD_SOURCE=fortweb FORTWEB_DIR=$(FORTWEB_DIR) FORTWEB_FETCH=$(FORTWEB_FETCH) FORTWEB_REF=$(FORTWEB_REF) FORTWEB_REMOTE=$(FORTWEB_REMOTE) ./sync-payload.sh
 
-payload-contract: ## Fail closed on blocked payload regressions and validate staged WebPayload
+payload-static-guards: ## Run non-mutating payload and loopback guardrails without restaging WebPayload
 	node tools/assert-no-proof-demo-shell.mjs
-	PAYLOAD_SOURCE=fortweb FORTWEB_DIR=$(FORTWEB_DIR) FORTWEB_FETCH=$(FORTWEB_FETCH) FORTWEB_REF=$(FORTWEB_REF) FORTWEB_REMOTE=$(FORTWEB_REMOTE) ./sync-payload.sh
+	node tools/assert-loopback-containment.mjs
 	node tools/validate-mobile-payload.mjs --payload-dir WebPayload --target ios-webpayload
+
+payload-contract: ## Fail closed on blocked payload regressions and validate staged WebPayload
+	$(MAKE) payload-static-guards
+	PAYLOAD_SOURCE=fortweb FORTWEB_DIR=$(FORTWEB_DIR) FORTWEB_FETCH=$(FORTWEB_FETCH) FORTWEB_REF=$(FORTWEB_REF) FORTWEB_REMOTE=$(FORTWEB_REMOTE) ./sync-payload.sh
 
 ios-list-sims: ## List available iOS Simulator destinations
 	xcrun simctl list devices available
@@ -135,7 +139,7 @@ focus-sim: require-simulator ## Boot and foreground the configured Simulator tar
 	@open -a Simulator --args -CurrentDeviceUDID "$(SIMULATOR_DEVICE)" >/dev/null 2>&1 || open -a Simulator || true
 	@osascript -e 'tell application "Simulator" to activate' >/dev/null 2>&1 || true
 
-build-sim: require-simulator ## Build KeriWallet for the resolved iOS Simulator (Debug)
+build-sim: require-simulator payload-static-guards ## Build KeriWallet for the resolved iOS Simulator (Debug)
 	xcodebuild build \
 	  -project $(XCODE_PROJECT) \
 	  -scheme $(SCHEME) \

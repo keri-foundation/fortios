@@ -10,6 +10,7 @@ const execFile = promisify(execFileCb);
 const testDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(testDir, '..', '..');
 const assertNoProofDemoShellScript = path.join(repoRoot, 'tools', 'assert-no-proof-demo-shell.mjs');
+const assertLoopbackContainmentScript = path.join(repoRoot, 'tools', 'assert-loopback-containment.mjs');
 const validateMobilePayloadScript = path.join(repoRoot, 'tools', 'validate-mobile-payload.mjs');
 const validatePyodideRuntimeScript = path.join(repoRoot, 'tools', 'validate-pyodide-runtime.mjs');
 const fortwebManifestScript = path.join(repoRoot, 'tools', 'gen-fortweb-bundle-manifest.mjs');
@@ -45,6 +46,62 @@ async function runNodeScriptExpectFailure(scriptPath, args) {
     }
 
     throw new Error(`Expected ${path.basename(scriptPath)} to fail`);
+}
+
+async function writeLoopbackFixture(tempDir, options = {}) {
+    const appConfigPath = path.join(tempDir, 'KeriWallet', 'AppConfig.swift');
+    const webContainerPath = path.join(tempDir, 'KeriWallet', 'WebContainerViewController.swift');
+    const loopbackServerPath = path.join(tempDir, 'xcodeproj', 'KeriWallet', 'KeriWallet', 'LocalLoopbackPayloadServer.swift');
+
+    const host = options.host ?? '127.0.0.1';
+    const enablement = options.enablement ?? `
+        #if DEBUG
+            let environment = ProcessInfo.processInfo.environment
+            if let flag = environment[environmentKey]?.lowercased(),
+                ["1", "true", "yes"].contains(flag)
+            {
+                return true
+            }
+            return arguments.contains(launchArgument)
+        #else
+            return false
+        #endif`;
+    const webContainerGuard = options.webContainerGuard ?? 'if AppConfig.Loopback.isEnabled {\n            return\n        }';
+    const loopbackBody = options.loopbackBody ?? `
+final class LocalLoopbackPayloadServer {
+    init(originHost: String = AppConfig.Loopback.host) {
+        let parameters = NWParameters.tcp
+        parameters.requiredLocalEndpoint = .hostPort(host: NWEndpoint.Host(originHost), port: port)
+        AppLogger.notice("[Loopback] loopback.server.ready host=\\"\\(originHost)\\"", category: AppConfig.Log.loopback)
+    }
+}`;
+
+    await writeTextFile(
+        appConfigPath,
+        `enum AppConfig {
+    enum Loopback {
+        static let environmentKey = "FORTIOS_LOOPBACK_ORIGIN"
+        static let launchArgument = "--fortios-loopback-origin"
+        static let host = "${host}"
+
+        static var isEnabled: Bool {${enablement}
+        }
+    }
+}
+
+// MARK: - Next section
+`
+    );
+    await writeTextFile(
+        webContainerPath,
+        `final class WebContainerViewController {
+    func resolveInitialPayloadTarget() {
+        ${webContainerGuard}
+    }
+}
+`
+    );
+    await writeTextFile(loopbackServerPath, loopbackBody);
 }
 
 function makeSharedManifest(overrides = {}) {
@@ -149,6 +206,83 @@ describe('assert-no-proof-demo-shell.mjs', () => {
         const error = await runNodeScriptExpectFailure(assertNoProofDemoShellScript, ['--root', repoDir]);
         expect(error.stdout).toContain('PAYLOAD_SOURCE=fort-ios');
         expect(error.stdout).toContain('FortWeb product-shell payload');
+    });
+});
+
+describe('assert-loopback-containment.mjs', () => {
+    it('passes when no loopback server file exists', async () => {
+        const repoDir = await makeTempDir();
+        await writeTextFile(path.join(repoDir, 'KeriWallet', 'AppConfig.swift'), 'enum AppConfig {}\n');
+
+        const { stdout } = await runNodeScript(assertLoopbackContainmentScript, ['--root', repoDir]);
+        expect(stdout).toContain('no LocalLoopbackPayloadServer.swift found');
+        expect(stdout).toContain('[loopback-guard] result: PASS');
+    });
+
+    it('passes for debug-gated loopback with 127.0.0.1', async () => {
+        const repoDir = await makeTempDir();
+        await writeLoopbackFixture(repoDir);
+
+        const { stdout } = await runNodeScript(assertLoopbackContainmentScript, ['--root', repoDir]);
+        expect(stdout).toContain('[loopback-guard] result: PASS');
+    });
+
+    it('fails when debug gating is missing', async () => {
+        const repoDir = await makeTempDir();
+        await writeLoopbackFixture(repoDir, {
+            enablement: `
+            let environment = ProcessInfo.processInfo.environment
+            return environment[environmentKey] == "1"`,
+        });
+
+        const error = await runNodeScriptExpectFailure(assertLoopbackContainmentScript, ['--root', repoDir]);
+        expect(error.stdout).toContain('loopback enablement must be wrapped in #if DEBUG');
+        expect(error.stdout).toContain('[loopback-guard] result: FAIL');
+    });
+
+    it('fails when the non-debug path does not default disabled', async () => {
+        const repoDir = await makeTempDir();
+        await writeLoopbackFixture(repoDir, {
+            enablement: `
+        #if DEBUG
+            return true
+        #else
+            return true
+        #endif`,
+        });
+
+        const error = await runNodeScriptExpectFailure(assertLoopbackContainmentScript, ['--root', repoDir]);
+        expect(error.stdout).toContain('non-debug loopback path must explicitly return false');
+        expect(error.stdout).toContain('[loopback-guard] result: FAIL');
+    });
+
+    it('fails when the bind host is 0.0.0.0', async () => {
+        const repoDir = await makeTempDir();
+        await writeLoopbackFixture(repoDir, { host: '0.0.0.0' });
+
+        const error = await runNodeScriptExpectFailure(assertLoopbackContainmentScript, ['--root', repoDir]);
+        expect(error.stdout).toContain('loopback host must be exactly 127.0.0.1');
+        expect(error.stdout).toContain('must not bind 0.0.0.0');
+        expect(error.stdout).toContain('[loopback-guard] result: FAIL');
+    });
+
+    it('fails when obvious sensitive logging markers appear', async () => {
+        const repoDir = await makeTempDir();
+        await writeLoopbackFixture(repoDir, {
+            loopbackBody: `
+final class LocalLoopbackPayloadServer {
+    init(originHost: String = AppConfig.Loopback.host) {
+        let parameters = NWParameters.tcp
+        parameters.requiredLocalEndpoint = .hostPort(host: NWEndpoint.Host(originHost), port: port)
+        AppLogger.notice("requestBody=\\(requestBody) passcode=\\(passcode)", category: AppConfig.Log.loopback)
+    }
+}`,
+        });
+
+        const error = await runNodeScriptExpectFailure(assertLoopbackContainmentScript, ['--root', repoDir]);
+        expect(error.stdout).toContain('loopback logging must not include request bodies');
+        expect(error.stdout).toContain('loopback logging must not include passcodes');
+        expect(error.stdout).toContain('[loopback-guard] result: FAIL');
     });
 });
 
