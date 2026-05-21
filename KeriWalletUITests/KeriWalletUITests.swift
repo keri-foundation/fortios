@@ -131,9 +131,23 @@ final class KeriWalletUITests: XCTestCase {
             return
         }
 
-        let alias = "diag-create-\(Int(Date().timeIntervalSince1970))"
+        let alias = "diag-ios-\(Int(Date().timeIntervalSince1970) % 1_000_000)"
+        let passcode = "0123456789abcdefghijk"
+
         focusAndType(alias, into: nameField, fieldName: "Name")
-        focusAndType("0123456789abcdefghijk", into: passcodeField, fieldName: "Passcode")
+        assertNameField(alias, matches: nameField, artifactName: "create-vault-name-corrupted-before-passcode")
+
+        guard passcodeField.isHittable else {
+            attachFailureArtifacts(named: "create-vault-passcode-not-hittable")
+            XCTFail("Create vault Passcode field should be tappable")
+            return
+        }
+
+        focusAndType(passcode, into: passcodeField, fieldName: "Passcode")
+        assertNameField(alias, matches: nameField, artifactName: "create-vault-name-corrupted-after-passcode")
+
+        dismissKeyboardIfNeeded(using: dialogTitle)
+        assertNameField(alias, matches: nameField, artifactName: "create-vault-name-corrupted-before-submit")
 
         let submitButton = webView.buttons["Create"]
         guard submitButton.waitForExistence(timeout: 5) else {
@@ -324,11 +338,11 @@ final class KeriWalletUITests: XCTestCase {
     }
 
     private func focusAndType(_ text: String, into field: XCUIElement, fieldName: String) {
-        let coordinate = field.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-        coordinate.tap()
+        field.tap()
 
         let keyboard = app.keyboards.firstMatch
         if !keyboard.waitForExistence(timeout: 2) {
+            let coordinate = field.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
             coordinate.tap()
         }
 
@@ -338,7 +352,78 @@ final class KeriWalletUITests: XCTestCase {
             return
         }
 
-        app.typeText(text)
+        clearTextIfNeeded(in: field)
+
+        if field.elementType == .secureTextField {
+            app.typeText(text)
+            assertSecureFieldCapturedInput(field, fieldName: fieldName)
+            return
+        }
+
+        field.typeText(text)
+    }
+
+    private func clearTextIfNeeded(in field: XCUIElement) {
+        let existingText = normalizedFieldValue(field)
+        guard !existingText.isEmpty else { return }
+
+        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: existingText.count))
+    }
+
+    private func normalizedFieldValue(_ field: XCUIElement) -> String {
+        let rawValue = field.value.map(String.init(describing:)) ?? ""
+        let trimmedValue = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        switch trimmedValue {
+        case "", "Name", "Passcode", "Secure Text Field", "Text Field":
+            return ""
+        default:
+            return trimmedValue
+        }
+    }
+
+    private func assertNameField(_ expectedAlias: String, matches field: XCUIElement, artifactName: String) {
+        let actualValue = normalizedFieldValue(field)
+
+        guard actualValue == expectedAlias else {
+            attachFailureArtifacts(named: artifactName)
+
+            if actualValue.hasPrefix(expectedAlias) && actualValue.count > expectedAlias.count {
+                XCTFail("Name field was mutated after passcode targeting; passcode text leaked into Name")
+                return
+            }
+
+            XCTFail("Name field did not preserve the expected alias")
+            return
+        }
+    }
+
+    private func assertSecureFieldCapturedInput(_ field: XCUIElement, fieldName: String) {
+        let actualValue = normalizedFieldValue(field)
+        guard !actualValue.isEmpty else {
+            attachFailureArtifacts(named: "\(fieldName)-input-missing")
+            XCTFail("\(fieldName) field did not capture input after targeting")
+            return
+        }
+    }
+
+    private func dismissKeyboardIfNeeded(using anchor: XCUIElement) {
+        let keyboard = app.keyboards.firstMatch
+        guard keyboard.exists else { return }
+
+        let dismissalButtons = ["Done", "Hide keyboard", "Return"]
+        for label in dismissalButtons {
+            let button = keyboard.buttons[label]
+            if button.exists && button.isHittable {
+                button.tap()
+                return
+            }
+        }
+
+        if anchor.exists && anchor.isHittable {
+            anchor.tap()
+            RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+        }
     }
 
     /// Attempts to navigate from the vault picker into an unlocked vault.
