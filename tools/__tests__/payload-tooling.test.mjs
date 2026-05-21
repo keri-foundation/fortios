@@ -1,5 +1,6 @@
 import { execFile as execFileCb } from 'node:child_process';
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -11,6 +12,7 @@ const testDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(testDir, '..', '..');
 const assertNoProofDemoShellScript = path.join(repoRoot, 'tools', 'assert-no-proof-demo-shell.mjs');
 const assertLoopbackContainmentScript = path.join(repoRoot, 'tools', 'assert-loopback-containment.mjs');
+const assertWebpayloadDriftScript = path.join(repoRoot, 'tools', 'assert-webpayload-drift.mjs');
 const validateMobilePayloadScript = path.join(repoRoot, 'tools', 'validate-mobile-payload.mjs');
 const validatePyodideRuntimeScript = path.join(repoRoot, 'tools', 'validate-pyodide-runtime.mjs');
 const fortwebManifestScript = path.join(repoRoot, 'tools', 'gen-fortweb-bundle-manifest.mjs');
@@ -29,6 +31,44 @@ async function writeTextFile(filePath, content) {
 
 async function writeJsonFile(filePath, data) {
     await writeTextFile(filePath, JSON.stringify(data, null, 2) + '\n');
+}
+
+async function listFilesRec(absDir) {
+    const entries = await readdir(absDir, { withFileTypes: true });
+    const files = [];
+
+    for (const entry of entries) {
+        const absPath = path.join(absDir, entry.name);
+        if (entry.isDirectory()) {
+            files.push(...(await listFilesRec(absPath)));
+            continue;
+        }
+        if (entry.isFile()) {
+            files.push(absPath);
+        }
+    }
+
+    return files;
+}
+
+async function hashPayloadTree(payloadDir) {
+    const files = await listFilesRec(payloadDir);
+    files.sort((left, right) => left.localeCompare(right));
+
+    const hash = createHash('sha256');
+    for (const absPath of files) {
+        const relPath = path.relative(payloadDir, absPath).replaceAll('\\', '/');
+        if (relPath === 'build-manifest.json') {
+            continue;
+        }
+
+        hash.update(relPath);
+        hash.update('\n');
+        hash.update(await readFile(absPath));
+        hash.update('\n');
+    }
+
+    return hash.digest('hex');
 }
 
 async function runNodeScript(scriptPath, args) {
@@ -119,6 +159,41 @@ function makeSharedManifest(overrides = {}) {
         source_git_status: 'clean',
         ...overrides,
     };
+}
+
+async function writeWebpayloadFixture(repoDir, manifestOverrides = {}, options = {}) {
+    const payloadDir = path.join(repoDir, 'WebPayload');
+    await writeTextFile(
+        path.join(payloadDir, 'index.html'),
+        '<script>window.location.replace(\'./fortweb/app/index.html\');</script>'
+    );
+    await writeTextFile(path.join(payloadDir, 'fortweb', 'app', 'index.html'), '<main>fortweb</main>\n');
+    await writeTextFile(path.join(payloadDir, 'fortweb', 'app', 'app', 'main.js'), 'export const boot = true;\n');
+
+    const baseManifest = makeSharedManifest({
+        build_command:
+            'PAYLOAD_SOURCE=fortweb FORTWEB_FETCH=1 FORTWEB_REF=214643f4fa907061334c09c8297c4d1e59f18f45 ./sync-payload.sh',
+        git_sha: '214643f4fa907061334c09c8297c4d1e59f18f45',
+        sync_targets: [{ id: 'ios-webpayload', path: 'WebPayload', mutations: ['redirect_root_to_fortweb_app'] }],
+    });
+    const manifest = { ...baseManifest, ...manifestOverrides };
+
+    if (options.omitEntryDocument) {
+        await rm(path.join(payloadDir, 'fortweb', 'app', 'index.html'), { force: true });
+    }
+
+    if (!options.skipManifest) {
+        if (!manifest.dist_tree_sha256) {
+            manifest.dist_tree_sha256 = await hashPayloadTree(payloadDir);
+        }
+        await writeJsonFile(path.join(payloadDir, 'build-manifest.json'), manifest);
+    }
+
+    if (options.malformedManifest) {
+        await writeTextFile(path.join(payloadDir, 'build-manifest.json'), '{not-json\n');
+    }
+
+    return { payloadDir, manifest };
 }
 
 afterEach(async () => {
@@ -283,6 +358,120 @@ final class LocalLoopbackPayloadServer {
         expect(error.stdout).toContain('loopback logging must not include request bodies');
         expect(error.stdout).toContain('loopback logging must not include passcodes');
         expect(error.stdout).toContain('[loopback-guard] result: FAIL');
+    });
+});
+
+describe('assert-webpayload-drift.mjs', () => {
+    it('passes for a valid staged WebPayload manifest and entry files', async () => {
+        const repoDir = await makeTempDir();
+        const { payloadDir } = await writeWebpayloadFixture(repoDir);
+
+        const { stdout } = await runNodeScript(assertWebpayloadDriftScript, [
+            '--root',
+            repoDir,
+            '--payload-dir',
+            payloadDir,
+        ]);
+
+        expect(stdout).toContain('[webpayload-drift] result: PASS');
+    });
+
+    it('fails when the staged manifest is missing', async () => {
+        const repoDir = await makeTempDir();
+        const { payloadDir } = await writeWebpayloadFixture(repoDir, {}, { skipManifest: true });
+
+        const error = await runNodeScriptExpectFailure(assertWebpayloadDriftScript, [
+            '--root',
+            repoDir,
+            '--payload-dir',
+            payloadDir,
+        ]);
+
+        expect(error.stdout).toContain('missing staged WebPayload build manifest');
+        expect(error.stdout).toContain('[webpayload-drift] result: FAIL');
+    });
+
+    it('fails when the staged manifest is malformed', async () => {
+        const repoDir = await makeTempDir();
+        const { payloadDir } = await writeWebpayloadFixture(repoDir, {}, { malformedManifest: true });
+
+        const error = await runNodeScriptExpectFailure(assertWebpayloadDriftScript, [
+            '--root',
+            repoDir,
+            '--payload-dir',
+            payloadDir,
+        ]);
+
+        expect(error.stdout).toContain('malformed JSON in staged WebPayload manifest');
+        expect(error.stdout).toContain('[webpayload-drift] result: FAIL');
+    });
+
+    it('fails when producer or payload profile drift from the mobile contract', async () => {
+        const repoDir = await makeTempDir();
+        const { payloadDir } = await writeWebpayloadFixture(repoDir, {
+            producer: 'fort-ios-local',
+            payload_profile: 'proof-shell',
+        });
+
+        const error = await runNodeScriptExpectFailure(assertWebpayloadDriftScript, [
+            '--root',
+            repoDir,
+            '--payload-dir',
+            payloadDir,
+        ]);
+
+        expect(error.stdout).toContain('producer drift');
+        expect(error.stdout).toContain('payload profile drift');
+        expect(error.stdout).toContain('[webpayload-drift] result: FAIL');
+    });
+
+    it('fails when a manifest-declared payload entry file is missing', async () => {
+        const repoDir = await makeTempDir();
+        const { payloadDir } = await writeWebpayloadFixture(repoDir, {}, { omitEntryDocument: true });
+
+        const error = await runNodeScriptExpectFailure(assertWebpayloadDriftScript, [
+            '--root',
+            repoDir,
+            '--payload-dir',
+            payloadDir,
+        ]);
+
+        expect(error.stdout).toContain('staged WebPayload is missing a manifest-declared entry file');
+        expect(error.stdout).toContain('[webpayload-drift] result: FAIL');
+    });
+
+    it('fails when the staged tree hash drifts from the manifest', async () => {
+        const repoDir = await makeTempDir();
+        const { payloadDir } = await writeWebpayloadFixture(repoDir, {
+            dist_tree_sha256: 'deadbeef',
+        });
+
+        const error = await runNodeScriptExpectFailure(assertWebpayloadDriftScript, [
+            '--root',
+            repoDir,
+            '--payload-dir',
+            payloadDir,
+        ]);
+
+        expect(error.stdout).toContain('staged WebPayload tree hash drift');
+        expect(error.stdout).toContain('[webpayload-drift] result: FAIL');
+    });
+
+    it('fails when the pinned FortWeb ref in build_command disagrees with git_sha', async () => {
+        const repoDir = await makeTempDir();
+        const { payloadDir } = await writeWebpayloadFixture(repoDir, {
+            git_sha: 'ffffffffffffffffffffffffffffffffffffffff',
+        });
+
+        const error = await runNodeScriptExpectFailure(assertWebpayloadDriftScript, [
+            '--root',
+            repoDir,
+            '--payload-dir',
+            payloadDir,
+        ]);
+
+        expect(error.stdout).toContain('git SHA drift');
+        expect(error.stdout).toContain('[webpayload-drift] result: FAIL');
     });
 });
 

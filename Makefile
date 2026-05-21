@@ -73,6 +73,7 @@ sync-fortweb: ## Explicit alias for the FortWeb wrapper staging path
 payload-static-guards: ## Run non-mutating payload and loopback guardrails without restaging WebPayload
 	node tools/assert-no-proof-demo-shell.mjs
 	node tools/assert-loopback-containment.mjs
+	node tools/assert-webpayload-drift.mjs
 	node tools/validate-mobile-payload.mjs --payload-dir WebPayload --target ios-webpayload
 
 payload-contract: ## Fail closed on blocked payload regressions and validate staged WebPayload
