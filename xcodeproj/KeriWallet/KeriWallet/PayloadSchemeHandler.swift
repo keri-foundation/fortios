@@ -233,6 +233,15 @@ final class PayloadSchemeHandler: NSObject, WKURLSchemeHandler {
                 "host": url.host ?? "",
                 "path": requestPath,
             ])
+        logTraceAssetIfNeeded(
+            phase: "start",
+            requestID: requestID,
+            url: url,
+            requestPath: requestPath,
+            normalizedPath: nil,
+            mime: nil,
+            bytes: nil,
+            errorKind: nil)
     }
 
     private func logRequestSuccess(
@@ -259,6 +268,15 @@ final class PayloadSchemeHandler: NSObject, WKURLSchemeHandler {
                 "status": String(statusCode),
                 "response_headers": summarizedHeaders(result.headers),
             ])
+        logTraceAssetIfNeeded(
+            phase: "success",
+            requestID: requestID,
+            url: url,
+            requestPath: requestPath,
+            normalizedPath: result.normalizedPath,
+            mime: result.mime,
+            bytes: result.data.count,
+            errorKind: nil)
     }
 
     private func logRequestError(
@@ -286,6 +304,57 @@ final class PayloadSchemeHandler: NSObject, WKURLSchemeHandler {
                 "error_kind": errorKind,
                 "error": errorDescription,
             ])
+        logTraceAssetIfNeeded(
+            phase: "error",
+            requestID: requestID,
+            url: url,
+            requestPath: path,
+            normalizedPath: normalizedPath,
+            mime: nil,
+            bytes: nil,
+            errorKind: errorKind)
+    }
+
+    private func logTraceAssetIfNeeded(
+        phase: String,
+        requestID: String,
+        url: URL?,
+        requestPath: String,
+        normalizedPath: String?,
+        mime: String?,
+        bytes: Int?,
+        errorKind: String?
+    ) {
+        guard WKRuntimeTraceAssetLog.isEnabled else { return }
+
+        let candidatePath = normalizedPath ?? requestPath
+        guard let assetKind = WKRuntimeTraceAssetLog.assetKind(for: candidatePath) else { return }
+
+        let label = WKRuntimeTraceAssetLog.label(for: assetKind)
+        let fields = [
+            "request_id": requestID,
+            "phase": phase,
+            "asset_kind": assetKind,
+            "url": url?.absoluteString ?? "",
+            "path": requestPath,
+            "normalized_path": normalizedPath ?? "",
+            "mime": mime ?? "",
+            "bytes": bytes.map(String.init) ?? "",
+            "error_kind": errorKind ?? "",
+        ]
+            .filter { !$0.value.isEmpty }
+            .sorted { $0.key < $1.key }
+            .map { key, value in "\(key)=\(quoted(value))" }
+            .joined(separator: " ")
+
+        let message = "[SchemeHandler] \(label) \(fields)"
+
+        switch phase {
+        case "error":
+            AppLogger.warning(message, category: AppConfig.Log.schemeHandler)
+        default:
+            AppLogger.info(message, category: AppConfig.Log.schemeHandler)
+        }
     }
 
     private func errorKind(for error: Error) -> String {
@@ -356,5 +425,61 @@ final class PayloadSchemeHandler: NSObject, WKURLSchemeHandler {
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
         return "\"\(escapedValue)\""
+    }
+}
+
+private enum WKRuntimeTraceAssetLog {
+    private static let environmentKey = "FORTIOS_WK_TRACE"
+
+    static var isEnabled: Bool {
+        #if DEBUG
+            let environment = ProcessInfo.processInfo.environment
+            if let flag = environment[environmentKey]?.lowercased() {
+                return ["1", "true", "yes"].contains(flag)
+            }
+
+            let arguments = ProcessInfo.processInfo.arguments
+            return arguments.contains("-FORTIOS_WK_TRACE")
+                || arguments.contains("\(environmentKey)=1")
+        #else
+            return false
+        #endif
+    }
+
+    static func assetKind(for path: String) -> String? {
+        let lowercased = path.lowercased()
+
+        if lowercased.contains("wallet-worker.py") {
+            return "worker_python"
+        }
+        if lowercased.contains("pyscript-ci.toml") {
+            return "pyodide_config"
+        }
+        if lowercased.contains("pyodide") {
+            return "pyodide_runtime"
+        }
+        if lowercased.hasSuffix(".wasm") {
+            return "wasm"
+        }
+        if lowercased.hasSuffix(".whl") {
+            return "wheel"
+        }
+        if lowercased.hasSuffix(".py") {
+            return "python"
+        }
+        if lowercased.hasSuffix(".js") || lowercased.hasSuffix(".mjs") {
+            return "javascript"
+        }
+
+        return nil
+    }
+
+    static func label(for assetKind: String) -> String {
+        switch assetKind {
+        case "pyodide_config", "pyodide_runtime", "wasm", "wheel", "python":
+            return "wk_trace.pyodide_asset"
+        default:
+            return "wk_trace.scheme_asset"
+        }
     }
 }

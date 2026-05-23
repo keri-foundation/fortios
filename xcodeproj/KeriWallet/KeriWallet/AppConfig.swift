@@ -33,7 +33,9 @@ enum AppConfig {
 
     enum Loopback {
         static let environmentKey = "FORTIOS_LOOPBACK_ORIGIN"
+        static let disableWorkaroundEnvironmentKey = "FORTIOS_DISABLE_LOOPBACK_WORKAROUND"
         static let launchArgument = "--fortios-loopback-origin"
+        static let disableWorkaroundLaunchArgument = "--fortios-disable-loopback-workaround"
         static let scheme = "http"
         static let host = "127.0.0.1"
 
@@ -53,6 +55,60 @@ enum AppConfig {
                 return false
             #endif
         }
+
+        static var shouldUseBlobWorkerWorkaround: Bool {
+            #if DEBUG
+                #if targetEnvironment(simulator)
+                    let environment = ProcessInfo.processInfo.environment
+                    if let flag = environment[disableWorkaroundEnvironmentKey]?.lowercased(),
+                        ["1", "true", "yes"].contains(flag)
+                    {
+                        return false
+                    }
+
+                    let arguments = ProcessInfo.processInfo.arguments
+                    if arguments.contains(disableWorkaroundLaunchArgument)
+                        || arguments.contains("\(disableWorkaroundEnvironmentKey)=1")
+                    {
+                        return false
+                    }
+
+                    if #available(iOS 26, *) {
+                        return true
+                    }
+
+                    return false
+                #else
+                    return false
+                #endif
+            #else
+                return false
+            #endif
+        }
+    }
+
+    enum FileOrigin {
+        #if DEBUG
+            static let environmentKey = "FORTIOS_FILE_URL_ORIGIN"
+            static let launchArgument = "--fortios-file-url-origin"
+
+            static var isEnabled: Bool {
+                let environment = ProcessInfo.processInfo.environment
+                if let flag = environment[environmentKey]?.lowercased(),
+                    ["1", "true", "yes"].contains(flag)
+                {
+                    return true
+                }
+
+                let arguments = ProcessInfo.processInfo.arguments
+                return arguments.contains(launchArgument)
+                    || arguments.contains("\(environmentKey)=1")
+            }
+        #else
+            static var isEnabled: Bool {
+                false
+            }
+        #endif
     }
 
     // MARK: - JS ↔ Swift Bridge
