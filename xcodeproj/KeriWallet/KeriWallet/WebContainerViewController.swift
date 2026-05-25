@@ -38,13 +38,17 @@ final class WebContainerViewController: UIViewController {
                 category: AppConfig.Log.webContainer)
         }
 
+        let initialPayloadTarget = resolveInitialPayloadTarget()
+        self.loopbackServer = initialPayloadTarget.server
+
+        RuntimeOriginUserScript.installIfNeeded(
+            on: userContentController,
+            target: initialPayloadTarget)
+
         let config = WKWebViewConfiguration()
         config.userContentController = userContentController
 
         config.setURLSchemeHandler(PayloadSchemeHandler(), forURLScheme: AppConfig.Scheme.name)
-
-        let initialPayloadTarget = resolveInitialPayloadTarget()
-        self.loopbackServer = initialPayloadTarget.server
 
         let webView = WKWebView(frame: .zero, configuration: config)
         self.webView = webView
@@ -364,6 +368,99 @@ private struct InitialPayloadTarget {
     let server: LocalLoopbackPayloadServer?
     let loopbackOrigin: LoopbackOrigin?
     let fileReadAccessRoot: URL?
+}
+
+private enum RuntimeOriginUserScript {
+    static func installIfNeeded(
+        on userContentController: WKUserContentController,
+        target: InitialPayloadTarget
+    ) {
+        guard target.loopbackOrigin == nil, target.fileReadAccessRoot == nil else {
+            AppLogger.notice(
+                "[WebContainer] runtime_origin_contract.skip reason=\"debug_origin\"",
+                category: AppConfig.Log.webContainer)
+            return
+        }
+
+        guard target.url.scheme?.lowercased() == AppConfig.Scheme.name else {
+            let scheme = target.url.scheme ?? ""
+            AppLogger.notice(
+                "[WebContainer] runtime_origin_contract.skip reason=\"non_app_scheme\" scheme=\"\(scheme)\"",
+                category: AppConfig.Log.webContainer)
+            return
+        }
+
+        guard let source = source() else {
+            AppLogger.error(
+                "[WebContainer] runtime_origin_contract.error error_kind=\"json_serialization_failed\"",
+                category: AppConfig.Log.webContainer)
+            return
+        }
+
+        let script = WKUserScript(
+            source: source,
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: true)
+        userContentController.addUserScript(script)
+
+        AppLogger.notice(
+            "[WebContainer] runtime_origin_contract.install platform=\"\(AppConfig.RuntimeOriginContract.platform)\" mode=\"\(AppConfig.RuntimeOriginContract.mode)\" document_origin_scheme=\"app\" worker_scheme=\"app\" config_scheme=\"app\" storage_namespace=\"\(AppConfig.RuntimeOriginContract.storageNamespace)\"",
+            category: AppConfig.Log.webContainer)
+    }
+
+    private static func source() -> String? {
+        let contract: [String: Any] = [
+            "schema": AppConfig.RuntimeOriginContract.schema,
+            "version": AppConfig.RuntimeOriginContract.version,
+            "platform": AppConfig.RuntimeOriginContract.platform,
+            "mode": AppConfig.RuntimeOriginContract.mode,
+            "documentOrigin": AppConfig.RuntimeOriginContract.documentOrigin,
+            "appBaseUrl": AppConfig.RuntimeOriginContract.appBaseURL,
+            "entryUrl": AppConfig.Scheme.entryURL,
+            "workerUrl": AppConfig.RuntimeOriginContract.workerURL,
+            "configUrl": AppConfig.RuntimeOriginContract.configURL,
+            "storage": [
+                "storageNamespace": AppConfig.RuntimeOriginContract.storageNamespace,
+                "indexedDbRequired": "unknown",
+                "originPartition": AppConfig.RuntimeOriginContract.originPartition
+            ],
+            "capabilities": [
+                "customScheme": true,
+                "httpsLikeAssetOrigin": false,
+                "implicitBlobOriginSafe": false,
+                "networkAllowed": false,
+                "bundledAssetsOnly": true
+            ]
+        ]
+
+        guard JSONSerialization.isValidJSONObject(contract),
+            let data = try? JSONSerialization.data(withJSONObject: contract, options: [.sortedKeys]),
+            let json = String(data: data, encoding: .utf8)
+        else {
+            return nil
+        }
+
+        return """
+        (function () {
+            const deepFreeze = function (value) {
+                if (!value || typeof value !== 'object') {
+                    return value;
+                }
+                Object.getOwnPropertyNames(value).forEach(function (key) {
+                    deepFreeze(value[key]);
+                });
+                return Object.freeze(value);
+            };
+            const contract = deepFreeze(\(json));
+            Object.defineProperty(window, "\(AppConfig.RuntimeOriginContract.globalName)", {
+                value: contract,
+                writable: false,
+                configurable: false,
+                enumerable: false
+            });
+        })();
+        """
+    }
 }
 
 private enum WKRuntimeTrace {

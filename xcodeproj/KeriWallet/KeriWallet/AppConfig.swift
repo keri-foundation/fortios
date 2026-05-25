@@ -133,6 +133,20 @@ enum AppConfig {
         static let maxResourceBytes = 20 * 1024 * 1024
     }
 
+    enum RuntimeOriginContract {
+        static let globalName = "__FORT_RUNTIME_ORIGIN__"
+        static let schema = "fortweb.runtime-origin.v1"
+        static let version = 1
+        static let platform = "ios-wkwebview"
+        static let mode = "bundled-offline"
+        static let documentOrigin = "app://local"
+        static let appBaseURL = "app://local"
+        static let workerURL = "app://local/fortweb/app/runtime/wallet-worker.py"
+        static let configURL = "app://local/fortweb/pyscript-ci.toml"
+        static let storageNamespace = "fortweb-ios-wkwebview-app-local"
+        static let originPartition = "app://local"
+    }
+
     // MARK: - HTTP Response
 
     enum HTTP {
