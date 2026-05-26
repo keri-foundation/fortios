@@ -136,17 +136,14 @@ final class WebContainerViewController: UIViewController {
 
     private func resolveInitialPayloadTarget() -> InitialPayloadTarget {
         let fileOriginRequested = AppConfig.FileOrigin.isEnabled
-        let explicitLoopbackRequested = AppConfig.Loopback.isEnabled
-        let workaroundLoopbackRequested = AppConfig.Loopback.shouldUseBlobWorkerWorkaround
+        let originSelection = AppConfig.Loopback.originSelection
 
         // DEBUG-only evidence probe: iOS has no documented Android-style reserved
         // local HTTPS asset origin, so this file:// lane is opt-in only.
         if fileOriginRequested {
             let reason: String
-            if explicitLoopbackRequested {
-                reason = "explicit_file_over_explicit_loopback"
-            } else if workaroundLoopbackRequested {
-                reason = "explicit_file_over_loopback_workaround"
+            if originSelection.mode == .loopback {
+                reason = "explicit_file_over_\(originSelection.reason)"
             } else {
                 reason = "explicit_opt_in"
             }
@@ -154,21 +151,15 @@ final class WebContainerViewController: UIViewController {
             return resolveFileOriginTarget(reason: reason)
         }
 
-        if AppConfig.Loopback.isEnabled {
-            return resolveLoopbackTarget(reason: "explicit_opt_in")
+        switch originSelection.mode {
+        case .loopback:
+            return resolveLoopbackTarget(reason: originSelection.reason)
+        case .appLocal:
+            return resolveAppSchemeTarget(reason: originSelection.reason)
         }
-
-        if workaroundLoopbackRequested {
-            AppLogger.notice(
-                "[Loopback] loopback.workaround reason=\"blob_worker_invalid_state\" trigger=\"ios26_simulator\"",
-                category: AppConfig.Log.loopback)
-            return resolveLoopbackTarget(reason: "ios26_simulator_blob_worker")
-        }
-
-        return resolveAppSchemeTarget()
     }
 
-    private func resolveAppSchemeTarget() -> InitialPayloadTarget {
+    private func resolveAppSchemeTarget(reason: String = "app_local_default") -> InitialPayloadTarget {
         guard let url = URL(string: AppConfig.Scheme.entryURL) else {
             AppLogger.error(
                 "[WebContainer] invalid initial URL", category: AppConfig.Log.webContainer)
@@ -178,6 +169,10 @@ final class WebContainerViewController: UIViewController {
                 loopbackOrigin: nil,
                 fileReadAccessRoot: nil)
         }
+
+        AppLogger.notice(
+            "[WebContainer] origin_mode selected=\"app-local\" reason=\"\(reason)\"",
+            category: AppConfig.Log.webContainer)
 
         return InitialPayloadTarget(
             url: url,
@@ -222,7 +217,7 @@ final class WebContainerViewController: UIViewController {
                 loopbackOrigin: nil,
                 fileReadAccessRoot: payloadRootURL)
         #else
-            return resolveAppSchemeTarget()
+            return resolveAppSchemeTarget(reason: "file_origin_unavailable")
         #endif
     }
 
@@ -232,6 +227,9 @@ final class WebContainerViewController: UIViewController {
             let loopbackOrigin = try server.start()
             let url = loopbackOrigin.entryURL
 
+            AppLogger.notice(
+                "[Loopback] origin_mode selected=\"loopback\" reason=\"\(reason)\" host=\"\(loopbackOrigin.host)\" port=\"\(loopbackOrigin.port)\" path_prefix=\"\(loopbackOrigin.pathPrefix)\" nonce=\"present\"",
+                category: AppConfig.Log.loopback)
             AppLogger.notice(
                 "[Loopback] loopback.load.url url=\"\(url.absoluteString)\" reason=\"\(reason)\"",
                 category: AppConfig.Log.loopback)
@@ -248,7 +246,7 @@ final class WebContainerViewController: UIViewController {
                 category: AppConfig.Log.loopback)
         }
 
-        return resolveAppSchemeTarget()
+        return resolveAppSchemeTarget(reason: "loopback_startup_failed")
     }
 
     private func displayedURLString(_ url: URL, relativeTo root: URL?) -> String {
@@ -376,9 +374,14 @@ private enum RuntimeOriginUserScript {
         target: InitialPayloadTarget
     ) {
         guard target.loopbackOrigin == nil, target.fileReadAccessRoot == nil else {
-            AppLogger.notice(
-                "[WebContainer] runtime_origin_contract.skip reason=\"debug_origin\"",
-                category: AppConfig.Log.webContainer)
+            if target.fileReadAccessRoot != nil {
+                AppLogger.notice(
+                    "[WebContainer] runtime_origin_contract.skip reason=\"file_origin\"",
+                    category: AppConfig.Log.webContainer)
+                return
+            }
+            guard target.loopbackOrigin != nil else { return }
+            install(on: userContentController, target: target)
             return
         }
 
@@ -390,7 +393,14 @@ private enum RuntimeOriginUserScript {
             return
         }
 
-        guard let source = source() else {
+        install(on: userContentController, target: target)
+    }
+
+    private static func install(
+        on userContentController: WKUserContentController,
+        target: InitialPayloadTarget
+    ) {
+        guard let source = source(target: target) else {
             AppLogger.error(
                 "[WebContainer] runtime_origin_contract.error error_kind=\"json_serialization_failed\"",
                 category: AppConfig.Log.webContainer)
@@ -403,29 +413,32 @@ private enum RuntimeOriginUserScript {
             forMainFrameOnly: true)
         userContentController.addUserScript(script)
 
+        let schemes = runtimeSchemes(for: target)
+
         AppLogger.notice(
-            "[WebContainer] runtime_origin_contract.install platform=\"\(AppConfig.RuntimeOriginContract.platform)\" mode=\"\(AppConfig.RuntimeOriginContract.mode)\" document_origin_scheme=\"app\" worker_scheme=\"app\" config_scheme=\"app\" storage_namespace=\"\(AppConfig.RuntimeOriginContract.storageNamespace)\"",
+            "[WebContainer] runtime_origin_contract.install platform=\"\(AppConfig.RuntimeOriginContract.platform)\" mode=\"\(AppConfig.RuntimeOriginContract.mode)\" document_origin_scheme=\"\(schemes.document)\" worker_scheme=\"\(schemes.worker)\" config_scheme=\"\(schemes.config)\" storage_namespace=\"\(storageNamespace(for: target))\"",
             category: AppConfig.Log.webContainer)
     }
 
-    private static func source() -> String? {
+    private static func source(target: InitialPayloadTarget) -> String? {
+        let values = contractValues(for: target)
         let contract: [String: Any] = [
             "schema": AppConfig.RuntimeOriginContract.schema,
             "version": AppConfig.RuntimeOriginContract.version,
             "platform": AppConfig.RuntimeOriginContract.platform,
             "mode": AppConfig.RuntimeOriginContract.mode,
-            "documentOrigin": AppConfig.RuntimeOriginContract.documentOrigin,
-            "appBaseUrl": AppConfig.RuntimeOriginContract.appBaseURL,
-            "entryUrl": AppConfig.Scheme.entryURL,
-            "workerUrl": AppConfig.RuntimeOriginContract.workerURL,
-            "configUrl": AppConfig.RuntimeOriginContract.configURL,
+            "documentOrigin": values.documentOrigin,
+            "appBaseUrl": values.appBaseURL,
+            "entryUrl": values.entryURL,
+            "workerUrl": values.workerURL,
+            "configUrl": values.configURL,
             "storage": [
-                "storageNamespace": AppConfig.RuntimeOriginContract.storageNamespace,
+                "storageNamespace": values.storageNamespace,
                 "indexedDbRequired": "unknown",
-                "originPartition": AppConfig.RuntimeOriginContract.originPartition
+                "originPartition": values.originPartition
             ],
             "capabilities": [
-                "customScheme": true,
+                "customScheme": values.customScheme,
                 "httpsLikeAssetOrigin": false,
                 "implicitBlobOriginSafe": false,
                 "networkAllowed": false,
@@ -461,6 +474,56 @@ private enum RuntimeOriginUserScript {
         })();
         """
     }
+
+    private static func contractValues(for target: InitialPayloadTarget) -> RuntimeOriginContractValues {
+        if let loopbackOrigin = target.loopbackOrigin {
+            let documentOrigin = loopbackOrigin.baseURL.absoluteString
+            return RuntimeOriginContractValues(
+                documentOrigin: documentOrigin,
+                appBaseURL: loopbackOrigin.appBaseURL.absoluteString,
+                entryURL: target.url.absoluteString,
+                workerURL: loopbackOrigin.payloadURL(
+                    for: "fortweb/app/runtime/wallet-worker.py").absoluteString,
+                configURL: loopbackOrigin.payloadURL(
+                    for: "fortweb/pyscript-ci.toml").absoluteString,
+                storageNamespace: "fortweb-ios-wkwebview-loopback",
+                originPartition: documentOrigin,
+                customScheme: false)
+        }
+
+        return RuntimeOriginContractValues(
+            documentOrigin: AppConfig.RuntimeOriginContract.documentOrigin,
+            appBaseURL: AppConfig.RuntimeOriginContract.appBaseURL,
+            entryURL: AppConfig.Scheme.entryURL,
+            workerURL: AppConfig.RuntimeOriginContract.workerURL,
+            configURL: AppConfig.RuntimeOriginContract.configURL,
+            storageNamespace: AppConfig.RuntimeOriginContract.storageNamespace,
+            originPartition: AppConfig.RuntimeOriginContract.originPartition,
+            customScheme: true)
+    }
+
+    private static func runtimeSchemes(for target: InitialPayloadTarget) -> (document: String, worker: String, config: String) {
+        let values = contractValues(for: target)
+        return (
+            URL(string: values.documentOrigin)?.scheme ?? "",
+            URL(string: values.workerURL)?.scheme ?? "",
+            URL(string: values.configURL)?.scheme ?? "")
+    }
+
+    private static func storageNamespace(for target: InitialPayloadTarget) -> String {
+        contractValues(for: target).storageNamespace
+    }
+}
+
+private struct RuntimeOriginContractValues {
+    let documentOrigin: String
+    let appBaseURL: String
+    let entryURL: String
+    let workerURL: String
+    let configURL: String
+    let storageNamespace: String
+    let originPartition: String
+    let customScheme: Bool
 }
 
 private enum WKRuntimeTrace {

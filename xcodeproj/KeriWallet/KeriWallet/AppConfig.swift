@@ -32,58 +32,77 @@ enum AppConfig {
     }
 
     enum Loopback {
+        enum OriginMode {
+            case appLocal
+            case loopback
+        }
+
+        struct OriginSelection {
+            let mode: OriginMode
+            let reason: String
+        }
+
+        static let originModeEnvironmentKey = "FORTIOS_ORIGIN_MODE"
         static let environmentKey = "FORTIOS_LOOPBACK_ORIGIN"
         static let disableWorkaroundEnvironmentKey = "FORTIOS_DISABLE_LOOPBACK_WORKAROUND"
         static let launchArgument = "--fortios-loopback-origin"
         static let disableWorkaroundLaunchArgument = "--fortios-disable-loopback-workaround"
         static let scheme = "http"
         static let host = "127.0.0.1"
+        static let pathPrefixSegment = "_fortios"
 
         static var isEnabled: Bool {
-            #if DEBUG
-                let environment = ProcessInfo.processInfo.environment
-                if let flag = environment[environmentKey]?.lowercased(),
-                    ["1", "true", "yes"].contains(flag)
-                {
-                    return true
-                }
-
-                let arguments = ProcessInfo.processInfo.arguments
-                return arguments.contains(launchArgument)
-                    || arguments.contains("\(environmentKey)=1")
-            #else
-                return false
-            #endif
+            originSelection.mode == .loopback
         }
 
-        static var shouldUseBlobWorkerWorkaround: Bool {
-            #if DEBUG
-                #if targetEnvironment(simulator)
-                    let environment = ProcessInfo.processInfo.environment
-                    if let flag = environment[disableWorkaroundEnvironmentKey]?.lowercased(),
-                        ["1", "true", "yes"].contains(flag)
-                    {
-                        return false
-                    }
+        static var originSelection: OriginSelection {
+            let environment = ProcessInfo.processInfo.environment
+            let arguments = ProcessInfo.processInfo.arguments
 
-                    let arguments = ProcessInfo.processInfo.arguments
-                    if arguments.contains(disableWorkaroundLaunchArgument)
-                        || arguments.contains("\(disableWorkaroundEnvironmentKey)=1")
-                    {
-                        return false
-                    }
+            if let requestedMode = environment[originModeEnvironmentKey]?.lowercased() {
+                if requestedMode == "app-local" || requestedMode == "app_local" {
+                    return OriginSelection(mode: .appLocal, reason: "explicit_origin_mode_app_local")
+                }
+                if requestedMode == "loopback" {
+                    #if DEBUG
+                    return OriginSelection(mode: .loopback, reason: "explicit_origin_mode_loopback")
+                    #else
+                        return OriginSelection(
+                            mode: .appLocal,
+                            reason: "explicit_origin_mode_loopback_unavailable_release")
+                    #endif
+                }
+                return OriginSelection(mode: .appLocal, reason: "invalid_origin_mode_app_local")
+            }
 
-                    if #available(iOS 26, *) {
-                        return true
-                    }
+            if environmentFlagIsEnabled(disableWorkaroundEnvironmentKey)
+                || arguments.contains(disableWorkaroundLaunchArgument)
+                || arguments.contains("\(disableWorkaroundEnvironmentKey)=1")
+            {
+                return OriginSelection(mode: .appLocal, reason: "legacy_loopback_opt_out")
+            }
 
-                    return false
+            if environmentFlagIsEnabled(environmentKey)
+                || arguments.contains(launchArgument)
+                || arguments.contains("\(environmentKey)=1")
+            {
+                #if DEBUG
+                return OriginSelection(mode: .loopback, reason: "legacy_loopback_opt_in")
                 #else
-                    return false
+                    return OriginSelection(
+                        mode: .appLocal,
+                        reason: "legacy_loopback_opt_in_unavailable_release")
                 #endif
-            #else
+            }
+
+            return OriginSelection(mode: .appLocal, reason: "app_local_default")
+        }
+
+        private static func environmentFlagIsEnabled(_ key: String) -> Bool {
+            guard let flag = ProcessInfo.processInfo.environment[key]?.lowercased() else {
                 return false
-            #endif
+            }
+            return ["1", "true", "yes"].contains(flag)
         }
     }
 

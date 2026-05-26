@@ -94,25 +94,107 @@ async function writeLoopbackFixture(tempDir, options = {}) {
     const loopbackServerPath = path.join(tempDir, 'xcodeproj', 'KeriWallet', 'KeriWallet', 'LocalLoopbackPayloadServer.swift');
 
     const host = options.host ?? '127.0.0.1';
-    const enablement = options.enablement ?? `
-        #if DEBUG
-            let environment = ProcessInfo.processInfo.environment
-            if let flag = environment[environmentKey]?.lowercased(),
-                ["1", "true", "yes"].contains(flag)
-            {
-                return true
+    const loopbackEnumBody = options.loopbackEnumBody ?? `
+        enum OriginMode {
+            case appLocal
+            case loopback
+        }
+
+        struct OriginSelection {
+            let mode: OriginMode
+            let reason: String
+        }
+
+        static let originModeEnvironmentKey = "FORTIOS_ORIGIN_MODE"
+        static let environmentKey = "FORTIOS_LOOPBACK_ORIGIN"
+        static let disableWorkaroundEnvironmentKey = "FORTIOS_DISABLE_LOOPBACK_WORKAROUND"
+        static let launchArgument = "--fortios-loopback-origin"
+        static let host = "${host}"
+        static let pathPrefixSegment = "_fortios"
+
+        static var isEnabled: Bool {
+            originSelection.mode == .loopback
+        }
+
+        static var originSelection: OriginSelection {
+            if false {
+                return OriginSelection(mode: .appLocal, reason: "explicit_origin_mode_app_local")
             }
-            return arguments.contains(launchArgument)
-        #else
-            return false
-        #endif`;
-    const webContainerGuard = options.webContainerGuard ?? 'if AppConfig.Loopback.isEnabled {\n            return\n        }';
+            if false {
+                #if DEBUG
+                    return OriginSelection(mode: .loopback, reason: "explicit_origin_mode_loopback")
+                #else
+                    return OriginSelection(mode: .appLocal, reason: "explicit_origin_mode_loopback_unavailable_release")
+                #endif
+            }
+            if false {
+                return OriginSelection(mode: .appLocal, reason: "invalid_origin_mode_app_local")
+            }
+            if false {
+                return OriginSelection(mode: .appLocal, reason: "legacy_loopback_opt_out")
+            }
+            if false {
+                #if DEBUG
+                    return OriginSelection(mode: .loopback, reason: "legacy_loopback_opt_in")
+                #else
+                    return OriginSelection(mode: .appLocal, reason: "legacy_loopback_opt_in_unavailable_release")
+                #endif
+            }
+
+            return OriginSelection(mode: .appLocal, reason: "app_local_default")
+        }`;
+    const webContainerGuard = options.webContainerGuard ?? `
+        let originSelection = AppConfig.Loopback.originSelection
+        _ = originSelection
+        _ = WebNavigationPolicy(allowedLoopbackOrigin: initialPayloadTarget.loopbackOrigin)
+        _ = LoopbackRuntimeOrigin(customScheme: false)
+        _ = ["customScheme": false, "networkAllowed": false, "bundledAssetsOnly": true]`;
     const loopbackBody = options.loopbackBody ?? `
+enum LocalLoopbackPayloadServerError: Error {
+    case invalidURL
+    case missingNoncePrefix
+    case queryStringNotAllowed
+}
+
 final class LocalLoopbackPayloadServer {
     init(originHost: String = AppConfig.Loopback.host) {
         let parameters = NWParameters.tcp
+        let port = NWEndpoint.Port(rawValue: 0)!
         parameters.requiredLocalEndpoint = .hostPort(host: NWEndpoint.Host(originHost), port: port)
         AppLogger.notice("[Loopback] loopback.server.ready host=\\"\\(originHost)\\"", category: AppConfig.Log.loopback)
+    }
+
+    func serve(request: Request, absoluteComponents: URLComponents, normalizedTarget: String, relativePath: String) throws {
+        if absoluteComponents.percentEncodedQuery != nil {
+            throw LocalLoopbackPayloadServerError.queryStringNotAllowed
+        }
+        if normalizedTarget.contains("?") {
+            throw LocalLoopbackPayloadServerError.queryStringNotAllowed
+        }
+        if absoluteComponents.percentEncodedFragment != nil {
+            throw LocalLoopbackPayloadServerError.invalidURL
+        }
+        if normalizedTarget.contains("#") {
+            throw LocalLoopbackPayloadServerError.invalidURL
+        }
+        guard request.method == "GET" || request.method == "HEAD" else { return }
+        guard allowedPayloadPaths.contains(relativePath) else { return }
+        _ = fileURL.resolvingSymlinksInPath()
+        guard decodedPath == currentOrigin.pathPrefix || decodedPath.hasPrefix("\\(currentOrigin.pathPrefix)/") else {
+            throw LocalLoopbackPayloadServerError.missingNoncePrefix
+        }
+    }
+
+    func displayURL(components: inout URLComponents) {
+        components.percentEncodedQuery = nil
+    }
+
+    func generateNonce() {
+        _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+    }
+
+    func matches(path: String, pathPrefix: String) -> Bool {
+        path == pathPrefix || path.hasPrefix("\\(pathPrefix)/")
     }
 }`;
 
@@ -120,12 +202,7 @@ final class LocalLoopbackPayloadServer {
         appConfigPath,
         `enum AppConfig {
     enum Loopback {
-        static let environmentKey = "FORTIOS_LOOPBACK_ORIGIN"
-        static let launchArgument = "--fortios-loopback-origin"
-        static let host = "${host}"
-
-        static var isEnabled: Bool {${enablement}
-        }
+${loopbackEnumBody}
     }
 }
 
@@ -304,30 +381,73 @@ describe('assert-loopback-containment.mjs', () => {
 
     it('fails when debug gating is missing', async () => {
         const repoDir = await makeTempDir();
+        const ungatedLoopbackEnum = `
+        enum OriginMode {
+            case appLocal
+            case loopback
+        }
+
+        struct OriginSelection {
+            let mode: OriginMode
+            let reason: String
+        }
+
+        static let originModeEnvironmentKey = "FORTIOS_ORIGIN_MODE"
+        static let environmentKey = "FORTIOS_LOOPBACK_ORIGIN"
+        static let disableWorkaroundEnvironmentKey = "FORTIOS_DISABLE_LOOPBACK_WORKAROUND"
+        static let launchArgument = "--fortios-loopback-origin"
+        static let host = "127.0.0.1"
+        static let pathPrefixSegment = "_fortios"
+
+        static var originSelection: OriginSelection {
+            return OriginSelection(mode: .loopback, reason: "legacy_loopback_opt_in")
+        }
+        `;
         await writeLoopbackFixture(repoDir, {
-            enablement: `
-            let environment = ProcessInfo.processInfo.environment
-            return environment[environmentKey] == "1"`,
+            loopbackEnumBody: ungatedLoopbackEnum,
         });
 
         const error = await runNodeScriptExpectFailure(assertLoopbackContainmentScript, ['--root', repoDir]);
-        expect(error.stdout).toContain('loopback enablement must be wrapped in #if DEBUG');
+        expect(error.stdout).toContain('loopback opt-in must be Debug-gated');
         expect(error.stdout).toContain('[loopback-guard] result: FAIL');
     });
 
-    it('fails when the non-debug path does not default disabled', async () => {
+    it('fails when release loopback fallback is missing', async () => {
         const repoDir = await makeTempDir();
+        const releaseFallbackMissing = `
+        enum OriginMode {
+            case appLocal
+            case loopback
+        }
+
+        struct OriginSelection {
+            let mode: OriginMode
+            let reason: String
+        }
+
+        static let originModeEnvironmentKey = "FORTIOS_ORIGIN_MODE"
+        static let environmentKey = "FORTIOS_LOOPBACK_ORIGIN"
+        static let disableWorkaroundEnvironmentKey = "FORTIOS_DISABLE_LOOPBACK_WORKAROUND"
+        static let launchArgument = "--fortios-loopback-origin"
+        static let host = "127.0.0.1"
+        static let pathPrefixSegment = "_fortios"
+
+        static var originSelection: OriginSelection {
+            #if DEBUG
+                return OriginSelection(mode: .loopback, reason: "legacy_loopback_opt_in")
+            #else
+                return OriginSelection(mode: .loopback, reason: "legacy_loopback_opt_in")
+            #endif
+            return OriginSelection(mode: .appLocal, reason: "invalid_origin_mode_app_local")
+            return OriginSelection(mode: .appLocal, reason: "app_local_default")
+        }
+        `;
         await writeLoopbackFixture(repoDir, {
-            enablement: `
-        #if DEBUG
-            return true
-        #else
-            return true
-        #endif`,
+            loopbackEnumBody: releaseFallbackMissing,
         });
 
         const error = await runNodeScriptExpectFailure(assertLoopbackContainmentScript, ['--root', repoDir]);
-        expect(error.stdout).toContain('non-debug loopback path must explicitly return false');
+        expect(error.stdout).toContain('legacy loopback opt-in must fall back in Release builds');
         expect(error.stdout).toContain('[loopback-guard] result: FAIL');
     });
 
@@ -357,6 +477,44 @@ final class LocalLoopbackPayloadServer {
         const error = await runNodeScriptExpectFailure(assertLoopbackContainmentScript, ['--root', repoDir]);
         expect(error.stdout).toContain('loopback logging must not include request bodies');
         expect(error.stdout).toContain('loopback logging must not include passcodes');
+        expect(error.stdout).toContain('[loopback-guard] result: FAIL');
+    });
+
+    it('fails when query strings are preserved instead of rejected', async () => {
+        const repoDir = await makeTempDir();
+        await writeLoopbackFixture(repoDir, {
+            loopbackBody: `
+final class LocalLoopbackPayloadServer {
+    init(originHost: String = AppConfig.Loopback.host) {
+        let parameters = NWParameters.tcp
+        let port = NWEndpoint.Port(rawValue: 0)!
+        parameters.requiredLocalEndpoint = .hostPort(host: NWEndpoint.Host(originHost), port: port)
+    }
+
+    func serve(request: Request, absoluteComponents: URLComponents, normalizedTarget: String, relativePath: String) {
+        components.percentEncodedQuery = absoluteComponents.percentEncodedQuery
+        guard request.method == "GET" || request.method == "HEAD" else { return }
+        guard allowedPayloadPaths.contains(relativePath) else { return }
+        _ = fileURL.resolvingSymlinksInPath()
+    }
+
+    func displayURL(components: inout URLComponents) {
+        components.percentEncodedQuery = nil
+    }
+
+    func generateNonce() {
+        _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+    }
+
+    func matches(path: String, pathPrefix: String) -> Bool {
+        path == pathPrefix || path.hasPrefix("\\(pathPrefix)/")
+    }
+}`,
+        });
+
+        const error = await runNodeScriptExpectFailure(assertLoopbackContainmentScript, ['--root', repoDir]);
+        expect(error.stdout).toContain('missing explicit query-string rejection policy');
+        expect(error.stdout).toContain('loopback server must reject, not preserve, absolute-URL query strings');
         expect(error.stdout).toContain('[loopback-guard] result: FAIL');
     });
 });

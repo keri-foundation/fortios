@@ -206,11 +206,12 @@ final class WebNavDelegate: NSObject, WKNavigationDelegate {
     private func navigationFields(url: URL?, navigationType: WKNavigationType?) -> String {
         var fields: [String] = []
 
-        fields.append("loopback_debug=\"\(policy.isLoopbackDebugEnabled ? "true" : "false")\"")
+        fields.append("loopback_active=\"\(policy.isLoopbackDebugEnabled ? "true" : "false")\"")
         fields.append("file_origin_debug=\"\(policy.isFileOriginDebugEnabled ? "true" : "false")\"")
 
         if let allowedLoopbackOrigin = policy.allowedLoopbackOrigin {
             fields.append("loopback_origin=\"\(quoted(allowedLoopbackOrigin.baseURL.absoluteString))\"")
+            fields.append("loopback_path_prefix=\"\(quoted(allowedLoopbackOrigin.pathPrefix))\"")
         }
 
         if policy.isFileOriginDebugEnabled {

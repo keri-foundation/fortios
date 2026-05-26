@@ -1,23 +1,49 @@
 import Foundation
 import Network
+import Security
 
 struct LoopbackOrigin: Equatable {
     let scheme: String
     let host: String
     let port: UInt16
+    let nonce: String
 
     var baseURL: URL {
         URL(string: "\(scheme)://\(host):\(port)")!
     }
 
+    var pathPrefix: String {
+        "/\(AppConfig.Loopback.pathPrefixSegment)/\(nonce)"
+    }
+
+    var appBaseURL: URL {
+        baseURL
+            .appendingPathComponent(AppConfig.Loopback.pathPrefixSegment, isDirectory: true)
+            .appendingPathComponent(nonce, isDirectory: true)
+    }
+
     var entryURL: URL {
-        baseURL.appendingPathComponent(AppConfig.Scheme.defaultIndexPath)
+        appBaseURL.appendingPathComponent(AppConfig.Scheme.defaultIndexPath)
+    }
+
+    func payloadURL(for relativePath: String) -> URL {
+        var url = appBaseURL
+        for part in relativePath.split(separator: "/") {
+            url.appendPathComponent(String(part), isDirectory: false)
+        }
+        return url
     }
 
     func matches(url: URL) -> Bool {
-        url.scheme?.lowercased() == scheme
+        guard url.scheme?.lowercased() == scheme
             && url.host?.lowercased() == host.lowercased()
             && url.port == Int(port)
+        else {
+            return false
+        }
+
+        let path = url.path.isEmpty ? "/" : url.path
+        return path == pathPrefix || path.hasPrefix("\(pathPrefix)/")
     }
 }
 
@@ -26,6 +52,8 @@ enum LocalLoopbackPayloadServerError: Error {
     case invalidListenerPort
     case invalidRequest
     case invalidURL
+    case missingNoncePrefix
+    case queryStringNotAllowed
     case startTimedOut
     case unsupportedMethod
 }
@@ -40,7 +68,11 @@ final class LocalLoopbackPayloadServer {
     private let queue = DispatchQueue(label: "com.kerifoundation.wallet.loopback")
     private let listener: NWListener
     private let originHost: String
+    private let payloadDirectory: URL
+    private let fileManager: FileManager
     private let payloadLoader: PayloadSchemeHandler
+    private let allowedPayloadPaths: Set<String>
+    private let nonce: String
     private var currentOrigin: LoopbackOrigin?
     private var isRunning = false
 
@@ -65,9 +97,15 @@ final class LocalLoopbackPayloadServer {
 
         self.listener = try NWListener(using: parameters, on: port)
         self.originHost = originHost
+        self.payloadDirectory = payloadDirectory
+        self.fileManager = fileManager
         self.payloadLoader = PayloadSchemeHandler(
             payloadDirectory: payloadDirectory,
             fileManager: fileManager)
+        self.allowedPayloadPaths = try Self.buildAllowedPayloadPaths(
+            payloadDirectory: payloadDirectory,
+            fileManager: fileManager)
+        self.nonce = Self.generateNonce()
     }
 
     deinit {
@@ -104,12 +142,13 @@ final class LocalLoopbackPayloadServer {
                 let origin = LoopbackOrigin(
                     scheme: AppConfig.Loopback.scheme,
                     host: self.originHost,
-                    port: port)
+                    port: port,
+                    nonce: self.nonce)
                 self.currentOrigin = origin
                 self.isRunning = true
 
                 AppLogger.notice(
-                    "[Loopback] loopback.server.ready host=\"\(self.originHost)\" port=\"\(port)\" base_url=\"\(origin.baseURL.absoluteString)\"",
+                    "[Loopback] loopback.server.ready host=\"\(self.originHost)\" port=\"\(port)\" base_url=\"\(origin.baseURL.absoluteString)\" path_prefix=\"\(origin.pathPrefix)\" nonce=\"present\"",
                     category: AppConfig.Log.loopback)
                 signalIfNeeded()
             case .failed(let error):
@@ -126,7 +165,7 @@ final class LocalLoopbackPayloadServer {
         }
 
         AppLogger.notice(
-            "[Loopback] loopback.server.start host=\"\(originHost)\" port=\"0\"",
+            "[Loopback] loopback.server.start host=\"\(originHost)\" port=\"0\" path_prefix_segment=\"\(AppConfig.Loopback.pathPrefixSegment)\" nonce=\"present\"",
             category: AppConfig.Log.loopback)
         listener.start(queue: queue)
 
@@ -214,7 +253,8 @@ final class LocalLoopbackPayloadServer {
                 throw LocalLoopbackPayloadServerError.unsupportedMethod
             }
 
-            let bundleURL = try appSchemeURL(for: request.path)
+            let payloadPath = try payloadPath(for: request.path)
+            let bundleURL = try appSchemeURL(for: payloadPath)
             let (body, mime, headers) = try payloadLoader.loadResource(for: bundleURL)
 
             var responseHeaders = headers
@@ -301,18 +341,36 @@ final class LocalLoopbackPayloadServer {
                 throw LocalLoopbackPayloadServerError.invalidURL
             }
 
+            guard
+                absoluteComponents.scheme?.lowercased() == currentOrigin.scheme,
+                absoluteComponents.host?.lowercased() == currentOrigin.host.lowercased(),
+                absoluteComponents.port == Int(currentOrigin.port)
+            else {
+                throw LocalLoopbackPayloadServerError.invalidURL
+            }
+
+            if absoluteComponents.percentEncodedQuery != nil {
+                throw LocalLoopbackPayloadServerError.queryStringNotAllowed
+            }
+
+            if absoluteComponents.percentEncodedFragment != nil {
+                throw LocalLoopbackPayloadServerError.invalidURL
+            }
+
             components.percentEncodedPath = absoluteComponents.percentEncodedPath.isEmpty
                 ? "/"
                 : absoluteComponents.percentEncodedPath
-            components.percentEncodedQuery = absoluteComponents.percentEncodedQuery
         } else {
             let normalizedTarget = target.hasPrefix("/") ? target : "/\(target)"
-            if let queryDelimiter = normalizedTarget.firstIndex(of: "?") {
-                components.percentEncodedPath = String(normalizedTarget[..<queryDelimiter])
-                components.percentEncodedQuery = String(normalizedTarget[normalizedTarget.index(after: queryDelimiter)...])
-            } else {
-                components.percentEncodedPath = normalizedTarget
+            if normalizedTarget.contains("?") {
+                throw LocalLoopbackPayloadServerError.queryStringNotAllowed
             }
+
+            if normalizedTarget.contains("#") {
+                throw LocalLoopbackPayloadServerError.invalidURL
+            }
+
+            components.percentEncodedPath = normalizedTarget
         }
 
         guard let url = components.url else {
@@ -322,12 +380,70 @@ final class LocalLoopbackPayloadServer {
         return url
     }
 
-    private func appSchemeURL(for requestPath: String) throws -> URL {
-        let normalizedPath = requestPath.hasPrefix("/") ? requestPath : "/\(requestPath)"
+    private func payloadPath(for requestPath: String) throws -> String {
+        guard let currentOrigin else {
+            throw LocalLoopbackPayloadServerError.invalidURL
+        }
+
+        guard let decodedPath = requestPath.removingPercentEncoding else {
+            throw LocalLoopbackPayloadServerError.invalidURL
+        }
+
+        guard decodedPath == currentOrigin.pathPrefix
+            || decodedPath.hasPrefix("\(currentOrigin.pathPrefix)/")
+        else {
+            throw LocalLoopbackPayloadServerError.missingNoncePrefix
+        }
+
+        let suffixStart = decodedPath.index(decodedPath.startIndex, offsetBy: currentOrigin.pathPrefix.count)
+        let suffix = String(decodedPath[suffixStart...])
+        let candidatePath = suffix.isEmpty || suffix == "/"
+            ? AppConfig.Scheme.defaultIndexPath
+            : String(suffix.drop(while: { $0 == "/" }))
+
+        guard !candidatePath.contains("\\") else {
+            throw PayloadSchemeError.disallowedPath
+        }
+
+        let parts = candidatePath.split(separator: "/", omittingEmptySubsequences: true)
+        guard !parts.isEmpty else {
+            return AppConfig.Scheme.defaultIndexPath
+        }
+
+        for part in parts where part == "." || part == ".." {
+            throw PayloadSchemeError.disallowedPath
+        }
+
+        let relativePath = parts.joined(separator: "/")
+        guard allowedPayloadPaths.contains(relativePath) else {
+            throw PayloadSchemeError.missingResource
+        }
+
+        try validateContainedPayloadFile(relativePath: relativePath)
+        return relativePath
+    }
+
+    private func appSchemeURL(for payloadPath: String) throws -> URL {
+        let normalizedPath = payloadPath.hasPrefix("/") ? payloadPath : "/\(payloadPath)"
         guard let url = URL(string: "\(AppConfig.Scheme.name)://local\(normalizedPath)") else {
             throw LocalLoopbackPayloadServerError.invalidURL
         }
         return url
+    }
+
+    private func validateContainedPayloadFile(relativePath: String) throws {
+        let fileURL = payloadDirectory.appendingPathComponent(relativePath, isDirectory: false)
+        let rootPath = payloadDirectory.resolvingSymlinksInPath().standardizedFileURL.path
+        let resolvedPath = fileURL.resolvingSymlinksInPath().standardizedFileURL.path
+
+        guard resolvedPath == rootPath || resolvedPath.hasPrefix("\(rootPath)/") else {
+            throw PayloadSchemeError.disallowedPath
+        }
+
+        let resourceValues = try fileURL.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+        if resourceValues.isDirectory == true || resourceValues.isSymbolicLink == true {
+            throw PayloadSchemeError.disallowedPath
+        }
     }
 
     private func sendResponse(
@@ -369,6 +485,10 @@ final class LocalLoopbackPayloadServer {
             return (400, "Bad Request", "invalid_request")
         case LocalLoopbackPayloadServerError.invalidURL:
             return (400, "Bad Request", "invalid_url")
+        case LocalLoopbackPayloadServerError.missingNoncePrefix:
+            return (403, "Forbidden", "missing_nonce_prefix")
+        case LocalLoopbackPayloadServerError.queryStringNotAllowed:
+            return (400, "Bad Request", "query_string_not_allowed")
         default:
             return (500, "Internal Server Error", String(describing: type(of: error)))
         }
@@ -381,7 +501,7 @@ final class LocalLoopbackPayloadServer {
             fields: [
                 "request_id": requestID,
                 "method": request.method,
-                "url": request.url.absoluteString,
+                "url": displayURL(for: request),
                 "path": request.path,
             ])
     }
@@ -400,7 +520,7 @@ final class LocalLoopbackPayloadServer {
             fields: [
                 "request_id": requestID,
                 "method": request.method,
-                "url": request.url.absoluteString,
+                "url": displayURL(for: request),
                 "path": request.path,
                 "mime": mime,
                 "bytes": "\(bytes)",
@@ -425,7 +545,7 @@ final class LocalLoopbackPayloadServer {
             fields: [
                 "request_id": requestID,
                 "method": request?.method ?? "",
-                "url": request?.url.absoluteString ?? "",
+                "url": request.map(displayURL(for:)) ?? "",
                 "path": request?.path ?? "",
                 "duration_ms": "\(durationMilliseconds(since: startedAt))",
                 "status": "\(statusCode)",
@@ -468,10 +588,61 @@ final class LocalLoopbackPayloadServer {
         max(0, Int(Date().timeIntervalSince(startedAt) * 1000))
     }
 
+    private func displayURL(for request: LoopbackRequest) -> String {
+        guard var components = URLComponents(url: request.url, resolvingAgainstBaseURL: false) else {
+            return request.path
+        }
+        components.percentEncodedQuery = nil
+        return components.url?.absoluteString ?? request.path
+    }
+
     private func quoted(_ value: String) -> String {
         let escapedValue = value
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
         return "\"\(escapedValue)\""
+    }
+
+    private static func buildAllowedPayloadPaths(
+        payloadDirectory: URL,
+        fileManager: FileManager
+    ) throws -> Set<String> {
+        guard
+            let enumerator = fileManager.enumerator(
+                at: payloadDirectory,
+                includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey],
+                options: [.skipsHiddenFiles])
+        else {
+            throw LocalLoopbackPayloadServerError.missingPayloadDirectory
+        }
+
+        let rootPath = payloadDirectory.standardizedFileURL.path
+        var paths = Set<String>()
+
+        for case let fileURL as URL in enumerator {
+            let values = try fileURL.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+            guard values.isRegularFile == true, values.isSymbolicLink != true else {
+                continue
+            }
+
+            let normalizedPath = fileURL.standardizedFileURL.path
+            guard normalizedPath.hasPrefix("\(rootPath)/") else {
+                continue
+            }
+
+            let relativePath = String(normalizedPath.dropFirst(rootPath.count + 1))
+            paths.insert(relativePath)
+        }
+
+        return paths
+    }
+
+    private static func generateNonce() -> String {
+        var bytes = [UInt8](repeating: 0, count: 16)
+        let result = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+        if result != errSecSuccess {
+            return UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+        }
+        return bytes.map { String(format: "%02x", $0) }.joined()
     }
 }

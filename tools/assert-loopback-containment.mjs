@@ -81,15 +81,57 @@ function violation(file, reason, expected) {
     return { file, reason, expected };
 }
 
-function extractLoopbackEnum(appConfigContent) {
-    const match = appConfigContent.match(/enum Loopback \{([\s\S]*?)\n\s*}\n\n\s*\/\//);
-    return match?.[1] ?? null;
+function extractEnumBody(source, enumName) {
+    const enumStart = source.indexOf(`enum ${enumName}`);
+    if (enumStart < 0) {
+        return null;
+    }
+
+    const bodyStart = source.indexOf('{', enumStart);
+    if (bodyStart < 0) {
+        return null;
+    }
+
+    let depth = 0;
+    for (let index = bodyStart; index < source.length; index += 1) {
+        const char = source[index];
+        if (char === '{') {
+            depth += 1;
+        }
+        if (char === '}') {
+            depth -= 1;
+            if (depth === 0) {
+                return source.slice(bodyStart + 1, index);
+            }
+        }
+    }
+
+    return null;
+}
+
+function requiredProbe(file, pattern, reason) {
+    return { file, pattern, reason, kind: 'required' };
+}
+
+function forbiddenProbe(file, pattern, reason) {
+    return { file, pattern, reason, kind: 'forbidden' };
+}
+
+function collectProbeViolations(probes, expected) {
+    const violations = [];
+    for (const probe of probes) {
+        const matches = probe.pattern.test(probe.file.content);
+        if ((probe.kind === 'required' && !matches) || (probe.kind === 'forbidden' && matches)) {
+            violations.push(violation(probe.file.relPath, probe.reason, expected));
+        }
+    }
+    return violations;
 }
 
 function validateLoopbackGating(appConfigFile, webContainerFile) {
     const violations = [];
-    const loopbackEnum = extractLoopbackEnum(appConfigFile.content);
-    const expected = 'Loopback is diagnostic-only scaffolding and must remain debug-gated, off by default, and loopback-only.';
+    const loopbackEnum = extractEnumBody(appConfigFile.content, 'Loopback');
+    const expected = 'Loopback must be explicit diagnostic scaffolding: app-local default, Debug-only opt-in loopback, Release fallback to app-local.';
 
     if (!loopbackEnum) {
         violations.push(
@@ -117,41 +159,83 @@ function validateLoopbackGating(appConfigFile, webContainerFile) {
         );
     }
 
-    const isEnabledIndex = loopbackEnum.indexOf('static var isEnabled: Bool {');
-    if (isEnabledIndex === -1) {
+    if (!loopbackEnum.includes('static let originModeEnvironmentKey = "FORTIOS_ORIGIN_MODE"')) {
         violations.push(
-            violation(appConfigFile.relPath, 'missing AppConfig.Loopback.isEnabled gate', expected)
+            violation(appConfigFile.relPath, 'missing FORTIOS_ORIGIN_MODE selector', expected)
         );
-        return violations;
     }
 
-    const isEnabledBody = loopbackEnum.slice(isEnabledIndex);
-    if (!/#if DEBUG/.test(isEnabledBody)) {
+    if (!/enum OriginMode \{[\s\S]*case appLocal[\s\S]*case loopback/.test(loopbackEnum)) {
         violations.push(
-            violation(appConfigFile.relPath, 'loopback enablement must be wrapped in #if DEBUG', expected)
+            violation(appConfigFile.relPath, 'missing explicit app-local and loopback origin modes', expected)
         );
     }
-    const elseBlock = isEnabledBody.match(/#else([\s\S]*?)#endif/);
-    if (!elseBlock || !/return false/.test(elseBlock[1])) {
+
+    if (/return OriginSelection\(mode: \.loopback, reason: "production_candidate_default"\)/.test(loopbackEnum)) {
         violations.push(
             violation(
                 appConfigFile.relPath,
-                'non-debug loopback path must explicitly return false',
+                'loopback must not be the production-candidate default origin',
                 expected
             )
         );
     }
-    if (!/#endif/.test(isEnabledBody)) {
+
+    if (!/return OriginSelection\(mode: \.appLocal, reason: "app_local_default"\)/.test(loopbackEnum)) {
         violations.push(
-            violation(appConfigFile.relPath, 'loopback enablement must close with #endif', expected)
+            violation(appConfigFile.relPath, 'app-local must be the fallback default origin', expected)
         );
     }
 
-    if (!webContainerFile.content.includes('if AppConfig.Loopback.isEnabled')) {
+    if (!loopbackEnum.includes('#if DEBUG')) {
+        violations.push(
+            violation(appConfigFile.relPath, 'loopback opt-in must be Debug-gated', expected)
+        );
+    }
+
+    if (!loopbackEnum.includes('explicit_origin_mode_loopback_unavailable_release')) {
+        violations.push(
+            violation(
+                appConfigFile.relPath,
+                'explicit loopback origin mode must fall back in Release builds',
+                expected
+            )
+        );
+    }
+
+    if (!loopbackEnum.includes('legacy_loopback_opt_in_unavailable_release')) {
+        violations.push(
+            violation(
+                appConfigFile.relPath,
+                'legacy loopback opt-in must fall back in Release builds',
+                expected
+            )
+        );
+    }
+
+    if (!loopbackEnum.includes('invalid_origin_mode_app_local')) {
+        violations.push(
+            violation(appConfigFile.relPath, 'invalid origin mode must fail closed to app-local', expected)
+        );
+    }
+
+    if (!loopbackEnum.includes('disableWorkaroundEnvironmentKey')) {
+        violations.push(
+            violation(appConfigFile.relPath, 'missing legacy app-local opt-out compatibility', expected)
+        );
+    }
+
+    if (!loopbackEnum.includes('environmentKey')) {
+        violations.push(
+            violation(appConfigFile.relPath, 'missing explicit legacy loopback opt-in compatibility', expected)
+        );
+    }
+
+    if (!webContainerFile.content.includes('let originSelection = AppConfig.Loopback.originSelection')) {
         violations.push(
             violation(
                 webContainerFile.relPath,
-                'web container must route loopback activation through AppConfig.Loopback.isEnabled',
+                'web container must route origin selection through AppConfig.Loopback.originSelection',
                 expected
             )
         );
@@ -161,7 +245,7 @@ function validateLoopbackGating(appConfigFile, webContainerFile) {
 }
 
 function validateBindHosts(appConfigFile, loopbackServerFile) {
-    const expected = 'Loopback is diagnostic-only scaffolding and must bind only to 127.0.0.1.';
+    const expected = 'Hardened loopback must bind only to 127.0.0.1 on an OS-assigned random port.';
     const violations = [];
     const sources = [appConfigFile, loopbackServerFile];
 
@@ -178,6 +262,76 @@ function validateBindHosts(appConfigFile, loopbackServerFile) {
             violation(
                 loopbackServerFile.relPath,
                 'loopback server must use requiredLocalEndpoint with the configured loopback host',
+                expected
+            )
+        );
+    }
+
+    if (!/NWEndpoint\.Port\(rawValue: 0\)/.test(loopbackServerFile.content)) {
+        violations.push(
+            violation(
+                loopbackServerFile.relPath,
+                'loopback server must request an OS-assigned random port with port 0',
+                expected
+            )
+        );
+    }
+
+    return violations;
+}
+
+function validateHardenedServing(appConfigFile, webContainerFile, loopbackServerFile) {
+    const expected = 'Hardened loopback must serve static bundled payload files only under a nonce-prefixed path.';
+    const violations = [];
+
+    const required = [
+        requiredProbe(appConfigFile, /static let pathPrefixSegment = "_fortios"/, 'missing fixed hardened path-prefix segment'),
+        requiredProbe(loopbackServerFile, /SecRandomCopyBytes\(kSecRandomDefault, bytes\.count, &bytes\)/, 'missing cryptographic per-launch nonce generation'),
+        requiredProbe(loopbackServerFile, /missingNoncePrefix/, 'missing rejection for requests without the nonce path prefix'),
+        requiredProbe(loopbackServerFile, /queryStringNotAllowed/, 'missing explicit query-string rejection policy'),
+        requiredProbe(loopbackServerFile, /percentEncodedQuery\s*!=\s*nil/, 'missing absolute-URL query rejection'),
+        requiredProbe(loopbackServerFile, /normalizedTarget\.contains\("\?"\)/, 'missing origin-form query rejection'),
+        requiredProbe(loopbackServerFile, /percentEncodedFragment\s*!=\s*nil/, 'missing absolute-URL fragment rejection'),
+        requiredProbe(loopbackServerFile, /normalizedTarget\.contains\("#"\)/, 'missing origin-form fragment rejection'),
+        requiredProbe(loopbackServerFile, /request\.method == "GET" \|\| request\.method == "HEAD"/, 'missing GET and HEAD method allowlist'),
+        requiredProbe(loopbackServerFile, /allowedPayloadPaths\.contains\(relativePath\)/, 'missing static payload file allowlist check'),
+        requiredProbe(loopbackServerFile, /resolvingSymlinksInPath\(\)/, 'missing symlink-aware payload containment check'),
+        requiredProbe(loopbackServerFile, /components\.percentEncodedQuery = nil/, 'request logging must strip query strings'),
+        requiredProbe(webContainerFile, /customScheme: false/, 'loopback runtime-origin contract must report customScheme=false'),
+        requiredProbe(webContainerFile, /networkAllowed": false/, 'runtime-origin contract must keep networkAllowed=false'),
+        requiredProbe(webContainerFile, /bundledAssetsOnly": true/, 'runtime-origin contract must keep bundledAssetsOnly=true'),
+    ];
+
+    const forbidden = [
+        forbiddenProbe(loopbackServerFile, /components\.percentEncodedQuery = absoluteComponents\.percentEncodedQuery/, 'loopback server must reject, not preserve, absolute-URL query strings'),
+        forbiddenProbe(loopbackServerFile, /components\.percentEncodedQuery = String\(/, 'loopback server must reject, not preserve, origin-form query strings'),
+    ];
+
+    violations.push(...collectProbeViolations(required, expected));
+    violations.push(...collectProbeViolations(forbidden, expected));
+
+    return violations;
+}
+
+function validateNavigationContainment(webContainerFile, loopbackServerFile) {
+    const expected = 'Navigation policy must allow only the active loopback origin and nonce-prefixed payload paths.';
+    const violations = [];
+
+    if (!/allowedLoopbackOrigin: initialPayloadTarget\.loopbackOrigin/.test(webContainerFile.content)) {
+        violations.push(
+            violation(
+                webContainerFile.relPath,
+                'web container must pass the active loopback origin into the navigation policy',
+                expected
+            )
+        );
+    }
+
+    if (!/path == pathPrefix \|\| path\.hasPrefix\("\\\(pathPrefix\)\/"\)/.test(loopbackServerFile.content)) {
+        violations.push(
+            violation(
+                loopbackServerFile.relPath,
+                'LoopbackOrigin.matches must require the nonce path prefix, not just host and port',
                 expected
             )
         );
@@ -244,6 +398,8 @@ async function main() {
     if (appConfigFile && webContainerFile) {
         violations.push(...validateLoopbackGating(appConfigFile, webContainerFile));
         violations.push(...validateBindHosts(appConfigFile, loopbackServerFile));
+        violations.push(...validateHardenedServing(appConfigFile, webContainerFile, loopbackServerFile));
+        violations.push(...validateNavigationContainment(webContainerFile, loopbackServerFile));
     }
     violations.push(...validateSensitiveLogging(loopbackServerFile));
 
