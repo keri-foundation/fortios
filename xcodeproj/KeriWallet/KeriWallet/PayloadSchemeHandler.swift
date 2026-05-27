@@ -115,7 +115,15 @@ final class PayloadSchemeHandler: NSObject, WKURLSchemeHandler {
     /// can exercise the full request-handling logic without requiring a live
     /// `WKURLSchemeTask`. Production callers use the `WKURLSchemeHandler` protocol.
     func loadResource(for url: URL) throws -> (Data, String, [String: String]) {
+        let requestPath = requestPath(for: url)
         let result = try loadResourceDetails(for: url)
+
+        if isInitialDocumentPath(requestPath) {
+            AppLogger.notice(
+                "[SchemeHandler] served initial document path=\(requestPath) bytes=\(result.data.count)",
+                category: AppConfig.Log.schemeHandler)
+        }
+
         return (result.data, result.mime, result.headers)
     }
 

@@ -76,9 +76,9 @@ payload-static-guards: ## Run non-mutating payload and loopback guardrails witho
 	node tools/assert-webpayload-drift.mjs
 	node tools/validate-mobile-payload.mjs --payload-dir WebPayload --target ios-webpayload
 
-payload-contract: ## Fail closed on blocked payload regressions and validate staged WebPayload
-	$(MAKE) payload-static-guards
+payload-contract: ## Stage then validate the shipped FortWeb payload contract
 	PAYLOAD_SOURCE=fortweb FORTWEB_DIR=$(FORTWEB_DIR) FORTWEB_FETCH=$(FORTWEB_FETCH) FORTWEB_REF=$(FORTWEB_REF) FORTWEB_REMOTE=$(FORTWEB_REMOTE) ./sync-payload.sh
+	$(MAKE) payload-static-guards
 
 ios-list-sims: ## List available iOS Simulator destinations
 	xcrun simctl list devices available

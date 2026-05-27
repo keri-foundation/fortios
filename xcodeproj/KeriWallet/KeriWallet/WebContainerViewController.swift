@@ -162,9 +162,10 @@ final class WebContainerViewController: UIViewController {
     private func resolveAppSchemeTarget(reason: String = "app_local_default") -> InitialPayloadTarget {
         guard let url = URL(string: AppConfig.Scheme.entryURL) else {
             AppLogger.error(
-                "[WebContainer] invalid initial URL", category: AppConfig.Log.webContainer)
+                "[WebContainer] invalid initial URL fallback=\"about_blank\" reason=\"\(reason)\"",
+                category: AppConfig.Log.webContainer)
             return InitialPayloadTarget(
-                url: URL(fileURLWithPath: "/"),
+                url: URL(string: AppConfig.Scheme.aboutBlankURL)!,
                 server: nil,
                 loopbackOrigin: nil,
                 fileReadAccessRoot: nil)
@@ -193,7 +194,7 @@ final class WebContainerViewController: UIViewController {
                 AppLogger.error(
                     "[WebContainer] file_origin.probe.error error_kind=\"missing_payload_root\" fallback=\"app_scheme\" reason=\"\(reason)\"",
                     category: AppConfig.Log.webContainer)
-                return resolveAppSchemeTarget()
+                return resolveAppSchemeTarget(reason: "file_origin_missing_payload_root")
             }
 
             let entryFileURL = payloadRootURL.appendingPathComponent(
@@ -204,7 +205,7 @@ final class WebContainerViewController: UIViewController {
                 AppLogger.error(
                     "[WebContainer] file_origin.probe.error error_kind=\"missing_entry_file\" entry=\"file://\(AppConfig.Payload.bundleSubdirectory)/\(AppConfig.Scheme.defaultIndexPath)\" fallback=\"app_scheme\" reason=\"\(reason)\"",
                     category: AppConfig.Log.webContainer)
-                return resolveAppSchemeTarget()
+                return resolveAppSchemeTarget(reason: "file_origin_missing_entry_file")
             }
 
             AppLogger.notice(

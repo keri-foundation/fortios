@@ -149,54 +149,42 @@ async function writeLoopbackFixture(tempDir, options = {}) {
         _ = WebNavigationPolicy(allowedLoopbackOrigin: initialPayloadTarget.loopbackOrigin)
         _ = LoopbackRuntimeOrigin(customScheme: false)
         _ = ["customScheme": false, "networkAllowed": false, "bundledAssetsOnly": true]`;
-    const loopbackBody = options.loopbackBody ?? `
-enum LocalLoopbackPayloadServerError: Error {
-    case invalidURL
-    case missingNoncePrefix
-    case queryStringNotAllowed
+    const webContainerBody = options.webContainerBody ?? `
+final class WebContainerViewController {
+    var loopbackServer: LocalLoopbackPayloadServer?
+    var webView: WKWebView?
+
+    deinit {
+        loopbackServer?.stop()
+        webView?.configuration.userContentController.removeScriptMessageHandler(
+            forName: AppConfig.Bridge.handlerName)
+    }
+
+    func resolveInitialPayloadTarget() {
+        ${webContainerGuard}
+    }
+
+    func resolveAppSchemeTarget(reason: String = "app_local_default") {
+        AppLogger.notice("[WebContainer] origin_mode selected=\\"app-local\\" reason=\\"\\(reason)\\"", category: AppConfig.Log.webContainer)
+    }
+
+    func resolveLoopbackTarget(reason: String) {
+        do {
+            _ = LocalLoopbackPayloadServer()
+        } catch {
+            AppLogger.error("[Loopback] loopback.server.error error_kind=\\"startup_failed\\" error=\\"\\(error.localizedDescription)\\" fallback=\\"app_scheme\\" reason=\\"\\(reason)\\"", category: AppConfig.Log.loopback)
+        }
+
+        _ = resolveAppSchemeTarget(reason: "loopback_startup_failed")
+    }
 }
-
-final class LocalLoopbackPayloadServer {
-    init(originHost: String = AppConfig.Loopback.host) {
-        let parameters = NWParameters.tcp
-        let port = NWEndpoint.Port(rawValue: 0)!
-        parameters.requiredLocalEndpoint = .hostPort(host: NWEndpoint.Host(originHost), port: port)
-        AppLogger.notice("[Loopback] loopback.server.ready host=\\"\\(originHost)\\"", category: AppConfig.Log.loopback)
-    }
-
-    func serve(request: Request, absoluteComponents: URLComponents, normalizedTarget: String, relativePath: String) throws {
-        if absoluteComponents.percentEncodedQuery != nil {
-            throw LocalLoopbackPayloadServerError.queryStringNotAllowed
-        }
-        if normalizedTarget.contains("?") {
-            throw LocalLoopbackPayloadServerError.queryStringNotAllowed
-        }
-        if absoluteComponents.percentEncodedFragment != nil {
-            throw LocalLoopbackPayloadServerError.invalidURL
-        }
-        if normalizedTarget.contains("#") {
-            throw LocalLoopbackPayloadServerError.invalidURL
-        }
-        guard request.method == "GET" || request.method == "HEAD" else { return }
-        guard allowedPayloadPaths.contains(relativePath) else { return }
-        _ = fileURL.resolvingSymlinksInPath()
-        guard decodedPath == currentOrigin.pathPrefix || decodedPath.hasPrefix("\\(currentOrigin.pathPrefix)/") else {
-            throw LocalLoopbackPayloadServerError.missingNoncePrefix
-        }
-    }
-
-    func displayURL(components: inout URLComponents) {
-        components.percentEncodedQuery = nil
-    }
-
-    func generateNonce() {
-        _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
-    }
-
-    func matches(path: String, pathPrefix: String) -> Bool {
-        path == pathPrefix || path.hasPrefix("\\(pathPrefix)/")
-    }
-}`;
+`;
+    const loopbackBody = options.loopbackBody ?? makePayloadPathLoopbackBody({
+        decodedPathLine: 'guard let decodedPath = requestPath.removingPercentEncoding else {\n            throw LocalLoopbackPayloadServerError.invalidURL\n        }',
+        backslashGuard: 'guard !candidatePath.contains("\\\\") else {\n            throw PayloadSchemeError.disallowedPath\n        }',
+        dotSegmentGuard: 'for part in parts where part == "." || part == ".." {\n            throw PayloadSchemeError.disallowedPath\n        }',
+        allowlistGuard: 'guard allowedPayloadPaths.contains(relativePath) else {\n            throw PayloadSchemeError.missingResource\n        }',
+    });
 
     await writeTextFile(
         appConfigPath,
@@ -211,14 +199,184 @@ ${loopbackEnumBody}
     );
     await writeTextFile(
         webContainerPath,
-        `final class WebContainerViewController {
-    func resolveInitialPayloadTarget() {
-        ${webContainerGuard}
-    }
-}
-`
+        webContainerBody
     );
     await writeTextFile(loopbackServerPath, loopbackBody);
+}
+
+function makePayloadPathLoopbackBody({
+    decodedPathLine,
+    backslashGuard,
+    dotSegmentGuard,
+    allowlistGuard,
+    containmentValidationLine = 'try validateContainedPayloadFile(relativePath: relativePath)',
+    containmentValidationBody = `
+    func validateContainedPayloadFile(relativePath: String) throws {
+        let fileURL = payloadDirectory.appendingPathComponent(relativePath, isDirectory: false)
+        let rootPath = payloadDirectory.resolvingSymlinksInPath().standardizedFileURL.path
+        let resolvedPath = fileURL.resolvingSymlinksInPath().standardizedFileURL.path
+
+        guard resolvedPath == rootPath || resolvedPath.hasPrefix("\\(rootPath)/") else {
+            throw PayloadSchemeError.disallowedPath
+        }
+
+        let resourceValues = try fileURL.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+        if resourceValues.isDirectory == true || resourceValues.isSymbolicLink == true {
+            throw PayloadSchemeError.disallowedPath
+        }
+    }
+`,
+    portLiteral = '0',
+    selectedPortLine = `guard let port = self.listener.port?.rawValue else {
+            throw LocalLoopbackPayloadServerError.invalidListenerPort
+        }`,
+    activeOriginPortExpression = 'port',
+    matchesGuard = `guard url.scheme?.lowercased() == scheme,
+              url.host?.lowercased() == host.lowercased(),
+              url.port == Int(port)
+        else {
+            return false
+        }`,
+    methodGuard = `guard request.method == "GET" || request.method == "HEAD" else {
+            throw LocalLoopbackPayloadServerError.unsupportedMethod
+        }`,
+    responseBodyExpression = 'request.method == "HEAD" ? Data() : body',
+    serverDeinitBody = 'stop()',
+    stopBody = `guard isRunning else { return }
+        isRunning = false
+        listener.cancel()`,
+}) {
+    return `
+struct LoopbackOrigin {
+    let scheme: String
+    let host: String
+    let port: UInt16
+    let nonce: String
+
+    var pathPrefix: String {
+        "/_fortios/\\(nonce)"
+    }
+
+    func matches(url: URL) -> Bool {
+        ${matchesGuard}
+
+        let path = url.path.isEmpty ? "/" : url.path
+        return path == pathPrefix || path.hasPrefix("\\(pathPrefix)/")
+    }
+}
+
+enum PayloadSchemeError: Error {
+    case disallowedPath
+    case missingResource
+}
+
+enum LocalLoopbackPayloadServerError: Error {
+    case invalidListenerPort
+    case invalidURL
+    case missingNoncePrefix
+    case queryStringNotAllowed
+    case unsupportedMethod
+}
+
+final class LocalLoopbackPayloadServer {
+    let listener: NWListener
+    var currentOrigin = LoopbackOrigin(scheme: "http", host: "127.0.0.1", port: 65418, nonce: "testnonce")
+    let payloadDirectory = URL(fileURLWithPath: "/tmp/WebPayload", isDirectory: true)
+    let allowedPayloadPaths: Set<String> = [
+        "fortweb/app/index.html",
+        "fortweb/app/runtime/allowed-name.js",
+    ]
+    let nonce = "testnonce"
+    var isRunning = false
+
+    init(originHost: String = AppConfig.Loopback.host) {
+        let parameters = NWParameters.tcp
+        let port = NWEndpoint.Port(rawValue: ${portLiteral})!
+        parameters.requiredLocalEndpoint = .hostPort(host: NWEndpoint.Host(originHost), port: port)
+        self.listener = try! NWListener(using: parameters, on: port)
+        AppLogger.notice("[Loopback] loopback.server.ready host=\\"\\(originHost)\\"", category: AppConfig.Log.loopback)
+    }
+
+    deinit {
+        ${serverDeinitBody}
+    }
+
+    func start() throws -> LoopbackOrigin {
+        ${selectedPortLine}
+        let origin = LoopbackOrigin(scheme: "http", host: "127.0.0.1", port: ${activeOriginPortExpression}, nonce: self.nonce)
+        self.currentOrigin = origin
+        self.isRunning = true
+        return origin
+    }
+
+    func stop() {
+        ${stopBody}
+    }
+
+    func serve(request: Request, absoluteComponents: URLComponents, normalizedTarget: String) throws {
+        if absoluteComponents.percentEncodedQuery != nil {
+            throw LocalLoopbackPayloadServerError.queryStringNotAllowed
+        }
+        if normalizedTarget.contains("?") {
+            throw LocalLoopbackPayloadServerError.queryStringNotAllowed
+        }
+        if absoluteComponents.percentEncodedFragment != nil {
+            throw LocalLoopbackPayloadServerError.invalidURL
+        }
+        if normalizedTarget.contains("#") {
+            throw LocalLoopbackPayloadServerError.invalidURL
+        }
+        ${methodGuard}
+        let relativePath = try payloadPath(for: request.path)
+        let body = Data(relativePath.utf8)
+        sendResponse(statusCode: 200, body: ${responseBodyExpression})
+        _ = fileURL.resolvingSymlinksInPath()
+    }
+
+    func payloadPath(for requestPath: String) throws -> String {
+        ${decodedPathLine}
+
+        guard decodedPath == currentOrigin.pathPrefix || decodedPath.hasPrefix("\\(currentOrigin.pathPrefix)/") else {
+            throw LocalLoopbackPayloadServerError.missingNoncePrefix
+        }
+
+        let suffixStart = decodedPath.index(decodedPath.startIndex, offsetBy: currentOrigin.pathPrefix.count)
+        let suffix = String(decodedPath[suffixStart...])
+        let candidatePath = suffix.isEmpty || suffix == "/"
+            ? "fortweb/app/index.html"
+            : String(suffix.drop(while: { $0 == "/" }))
+
+        ${backslashGuard}
+
+        let parts = candidatePath.split(separator: "/", omittingEmptySubsequences: true)
+        guard !parts.isEmpty else {
+            return "fortweb/app/index.html"
+        }
+
+        ${dotSegmentGuard}
+
+        let relativePath = parts.joined(separator: "/")
+        ${allowlistGuard}
+        ${containmentValidationLine}
+        return relativePath
+    }
+
+${containmentValidationBody}
+
+    func displayURL(components: inout URLComponents) {
+        components.percentEncodedQuery = nil
+    }
+
+    func sendResponse(statusCode: Int, body: Data) {
+        _ = statusCode
+        _ = body
+    }
+
+    func generateNonce() {
+        _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+    }
+}
+`;
 }
 
 function makeSharedManifest(overrides = {}) {
@@ -361,6 +519,20 @@ describe('assert-no-proof-demo-shell.mjs', () => {
     });
 });
 
+describe('Makefile payload contract ordering', () => {
+    it('stages WebPayload before running static guards', async () => {
+        const makefile = await readFile(path.join(repoRoot, 'Makefile'), 'utf8');
+        const syncIndex = makefile.indexOf(
+            'PAYLOAD_SOURCE=fortweb FORTWEB_DIR=$(FORTWEB_DIR) FORTWEB_FETCH=$(FORTWEB_FETCH) FORTWEB_REF=$(FORTWEB_REF) FORTWEB_REMOTE=$(FORTWEB_REMOTE) ./sync-payload.sh'
+        );
+        const guardIndex = makefile.indexOf('$(MAKE) payload-static-guards');
+
+        expect(syncIndex).toBeGreaterThan(-1);
+        expect(guardIndex).toBeGreaterThan(-1);
+        expect(syncIndex).toBeLessThan(guardIndex);
+    });
+});
+
 describe('assert-loopback-containment.mjs', () => {
     it('passes when no loopback server file exists', async () => {
         const repoDir = await makeTempDir();
@@ -451,6 +623,392 @@ describe('assert-loopback-containment.mjs', () => {
         expect(error.stdout).toContain('[loopback-guard] result: FAIL');
     });
 
+    it('fails when loopback startup failure does not fall back to app-local', async () => {
+        const repoDir = await makeTempDir();
+        await writeLoopbackFixture(repoDir, {
+            webContainerBody: `
+final class WebContainerViewController {
+    func resolveInitialPayloadTarget() {
+        let originSelection = AppConfig.Loopback.originSelection
+        _ = originSelection
+        _ = WebNavigationPolicy(allowedLoopbackOrigin: initialPayloadTarget.loopbackOrigin)
+        _ = LoopbackRuntimeOrigin(customScheme: false)
+        _ = ["customScheme": false, "networkAllowed": false, "bundledAssetsOnly": true]
+    }
+
+    func resolveLoopbackTarget(reason: String) {
+        do {
+            _ = LocalLoopbackPayloadServer()
+        } catch {
+            AppLogger.error("[Loopback] loopback.server.error error_kind=\\"startup_failed\\" error=\\"\\(error.localizedDescription)\\" reason=\\"\\(reason)\\"", category: AppConfig.Log.loopback)
+        }
+    }
+}
+`,
+        });
+
+        const error = await runNodeScriptExpectFailure(assertLoopbackContainmentScript, ['--root', repoDir]);
+        expect(error.stdout).toContain('loopback startup failure must log fallback="app_scheme"');
+        expect(error.stdout).toContain('loopback startup failure must fall back via resolveAppSchemeTarget(reason: "loopback_startup_failed")');
+        expect(error.stdout).toContain('[loopback-guard] result: FAIL');
+    });
+
+    it('fails source-policy proof when the active origin is not built from the listener-selected port', async () => {
+        const repoDir = await makeTempDir();
+        await writeLoopbackFixture(repoDir, {
+            loopbackBody: makePayloadPathLoopbackBody({
+                decodedPathLine: 'guard let decodedPath = requestPath.removingPercentEncoding else {\n            throw LocalLoopbackPayloadServerError.invalidURL\n        }',
+                backslashGuard: 'guard !candidatePath.contains("\\\\") else {\n            throw PayloadSchemeError.disallowedPath\n        }',
+                dotSegmentGuard: 'for part in parts where part == "." || part == ".." {\n            throw PayloadSchemeError.disallowedPath\n        }',
+                allowlistGuard: 'guard allowedPayloadPaths.contains(relativePath) else {\n            throw PayloadSchemeError.missingResource\n        }',
+                activeOriginPortExpression: '65418',
+            }),
+        });
+
+        const error = await runNodeScriptExpectFailure(assertLoopbackContainmentScript, ['--root', repoDir]);
+        expect(error.stdout).toContain('loopback server must build the active origin from the actual selected port, not a hardcoded or requested port');
+        expect(error.stdout).toContain('[loopback-guard] result: FAIL');
+    });
+
+    it('fails source-policy proof when loopback startup does not read the selected listener port before building the active origin', async () => {
+        const repoDir = await makeTempDir();
+        await writeLoopbackFixture(repoDir, {
+            loopbackBody: makePayloadPathLoopbackBody({
+                decodedPathLine: 'guard let decodedPath = requestPath.removingPercentEncoding else {\n            throw LocalLoopbackPayloadServerError.invalidURL\n        }',
+                backslashGuard: 'guard !candidatePath.contains("\\\\") else {\n            throw PayloadSchemeError.disallowedPath\n        }',
+                dotSegmentGuard: 'for part in parts where part == "." || part == ".." {\n            throw PayloadSchemeError.disallowedPath\n        }',
+                allowlistGuard: 'guard allowedPayloadPaths.contains(relativePath) else {\n            throw PayloadSchemeError.missingResource\n        }',
+                selectedPortLine: 'let port = 65418',
+            }),
+        });
+
+        const error = await runNodeScriptExpectFailure(assertLoopbackContainmentScript, ['--root', repoDir]);
+        expect(error.stdout).toContain('loopback server must read the actual listener-selected port before constructing the active origin');
+        expect(error.stdout).toContain('[loopback-guard] result: FAIL');
+    });
+
+    it('fails source-policy proof when missing nonce paths are not rejected before asset lookup', async () => {
+        const repoDir = await makeTempDir();
+        await writeLoopbackFixture(repoDir, {
+            loopbackBody: `
+struct LoopbackOrigin {
+    let scheme: String
+    let host: String
+    let port: UInt16
+    let pathPrefix: String
+
+    func matches(url: URL) -> Bool {
+        guard url.scheme?.lowercased() == scheme,
+              url.host?.lowercased() == host.lowercased(),
+              url.port == Int(port)
+        else {
+            return false
+        }
+
+        let path = url.path.isEmpty ? "/" : url.path
+        return path == pathPrefix || path.hasPrefix("\\(pathPrefix)/")
+    }
+}
+
+enum LocalLoopbackPayloadServerError: Error {
+    case invalidURL
+    case queryStringNotAllowed
+}
+
+final class LocalLoopbackPayloadServer {
+    init(originHost: String = AppConfig.Loopback.host) {
+        let parameters = NWParameters.tcp
+        let port = NWEndpoint.Port(rawValue: 0)!
+        parameters.requiredLocalEndpoint = .hostPort(host: NWEndpoint.Host(originHost), port: port)
+        AppLogger.notice("[Loopback] loopback.server.ready host=\\"\\(originHost)\\"", category: AppConfig.Log.loopback)
+    }
+
+    func serve(request: Request, absoluteComponents: URLComponents, normalizedTarget: String, relativePath: String) throws {
+        if absoluteComponents.percentEncodedQuery != nil {
+            throw LocalLoopbackPayloadServerError.queryStringNotAllowed
+        }
+        if normalizedTarget.contains("?") {
+            throw LocalLoopbackPayloadServerError.queryStringNotAllowed
+        }
+        if absoluteComponents.percentEncodedFragment != nil {
+            throw LocalLoopbackPayloadServerError.invalidURL
+        }
+        if normalizedTarget.contains("#") {
+            throw LocalLoopbackPayloadServerError.invalidURL
+        }
+        guard request.method == "GET" || request.method == "HEAD" else { return }
+        let candidatePath = relativePath.isEmpty ? "index.html" : relativePath
+        guard allowedPayloadPaths.contains(candidatePath) else { return }
+        _ = fileURL.resolvingSymlinksInPath()
+    }
+
+    func displayURL(components: inout URLComponents) {
+        components.percentEncodedQuery = nil
+    }
+
+    func generateNonce() {
+        _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+    }
+}
+`,
+        });
+
+        const error = await runNodeScriptExpectFailure(assertLoopbackContainmentScript, ['--root', repoDir]);
+        expect(error.stdout).toContain('missing rejection for requests without the nonce path prefix');
+        expect(error.stdout).toContain('missing or wrong nonce paths must be rejected before asset lookup');
+        expect(error.stdout).toContain('[loopback-guard] result: FAIL');
+    });
+
+    it('fails source-policy proof when wrong nonce paths are treated as valid loopback prefixes', async () => {
+        const repoDir = await makeTempDir();
+        await writeLoopbackFixture(repoDir, {
+            loopbackBody: `
+struct LoopbackOrigin {
+    let scheme: String
+    let host: String
+    let port: UInt16
+    let pathPrefix: String
+
+    func matches(url: URL) -> Bool {
+        guard url.scheme?.lowercased() == scheme,
+              url.host?.lowercased() == host.lowercased(),
+              url.port == Int(port)
+        else {
+            return false
+        }
+
+        let path = url.path.isEmpty ? "/" : url.path
+        return path == pathPrefix || path.hasPrefix("\\(pathPrefix)/")
+    }
+}
+
+enum LocalLoopbackPayloadServerError: Error {
+    case invalidURL
+    case missingNoncePrefix
+    case queryStringNotAllowed
+}
+
+final class LocalLoopbackPayloadServer {
+    init(originHost: String = AppConfig.Loopback.host) {
+        let parameters = NWParameters.tcp
+        let port = NWEndpoint.Port(rawValue: 0)!
+        parameters.requiredLocalEndpoint = .hostPort(host: NWEndpoint.Host(originHost), port: port)
+        AppLogger.notice("[Loopback] loopback.server.ready host=\\"\\(originHost)\\"", category: AppConfig.Log.loopback)
+    }
+
+    func serve(request: Request, absoluteComponents: URLComponents, normalizedTarget: String, relativePath: String) throws {
+        if absoluteComponents.percentEncodedQuery != nil {
+            throw LocalLoopbackPayloadServerError.queryStringNotAllowed
+        }
+        if normalizedTarget.contains("?") {
+            throw LocalLoopbackPayloadServerError.queryStringNotAllowed
+        }
+        if absoluteComponents.percentEncodedFragment != nil {
+            throw LocalLoopbackPayloadServerError.invalidURL
+        }
+        if normalizedTarget.contains("#") {
+            throw LocalLoopbackPayloadServerError.invalidURL
+        }
+        guard request.method == "GET" || request.method == "HEAD" else { return }
+        guard decodedPath.hasPrefix("/_fortios/") else {
+            throw LocalLoopbackPayloadServerError.missingNoncePrefix
+        }
+        guard allowedPayloadPaths.contains(relativePath) else { return }
+        _ = fileURL.resolvingSymlinksInPath()
+    }
+
+    func displayURL(components: inout URLComponents) {
+        components.percentEncodedQuery = nil
+    }
+
+    func generateNonce() {
+        _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+    }
+}
+`,
+        });
+
+        const error = await runNodeScriptExpectFailure(assertLoopbackContainmentScript, ['--root', repoDir]);
+        expect(error.stdout).toContain('missing or wrong nonce paths must be rejected before asset lookup');
+        expect(error.stdout).toContain('loopback server must not accept any /_fortios/<value>/ prefix without matching currentOrigin.pathPrefix');
+        expect(error.stdout).toContain('[loopback-guard] result: FAIL');
+    });
+
+    it('fails source-policy proof when encoded traversal is not percent-decoded before traversal checks', async () => {
+        const repoDir = await makeTempDir();
+        await writeLoopbackFixture(repoDir, {
+            loopbackBody: makePayloadPathLoopbackBody({
+                decodedPathLine: 'let decodedPath = requestPath',
+                backslashGuard: 'guard !candidatePath.contains("\\\\") else {\n            throw PayloadSchemeError.disallowedPath\n        }',
+                dotSegmentGuard: 'for part in parts where part == "." || part == ".." {\n            throw PayloadSchemeError.disallowedPath\n        }',
+                allowlistGuard: 'guard allowedPayloadPaths.contains(relativePath) else {\n            throw PayloadSchemeError.missingResource\n        }',
+            }),
+        });
+
+        const error = await runNodeScriptExpectFailure(assertLoopbackContainmentScript, ['--root', repoDir]);
+        expect(error.stdout).toContain('missing percent-decoded request path handling before encoded traversal rejection');
+        expect(error.stdout).toContain('[loopback-guard] result: FAIL');
+    });
+
+    it('fails source-policy proof when dot-segment traversal is not rejected before static asset lookup', async () => {
+        const repoDir = await makeTempDir();
+        await writeLoopbackFixture(repoDir, {
+            loopbackBody: makePayloadPathLoopbackBody({
+                decodedPathLine: 'guard let decodedPath = requestPath.removingPercentEncoding else {\n            throw LocalLoopbackPayloadServerError.invalidURL\n        }',
+                backslashGuard: 'guard !candidatePath.contains("\\\\") else {\n            throw PayloadSchemeError.disallowedPath\n        }',
+                dotSegmentGuard: '_ = parts',
+                allowlistGuard: 'guard allowedPayloadPaths.contains(relativePath) else {\n            throw PayloadSchemeError.missingResource\n        }',
+            }),
+        });
+
+        const error = await runNodeScriptExpectFailure(assertLoopbackContainmentScript, ['--root', repoDir]);
+        expect(error.stdout).toContain('missing dot-segment traversal rejection before static asset lookup');
+        expect(error.stdout).toContain('[loopback-guard] result: FAIL');
+    });
+
+    it('fails source-policy proof when backslash traversal is not rejected before static asset lookup', async () => {
+        const repoDir = await makeTempDir();
+        await writeLoopbackFixture(repoDir, {
+            loopbackBody: makePayloadPathLoopbackBody({
+                decodedPathLine: 'guard let decodedPath = requestPath.removingPercentEncoding else {\n            throw LocalLoopbackPayloadServerError.invalidURL\n        }',
+                backslashGuard: '_ = candidatePath',
+                dotSegmentGuard: 'for part in parts where part == "." || part == ".." {\n            throw PayloadSchemeError.disallowedPath\n        }',
+                allowlistGuard: 'guard allowedPayloadPaths.contains(relativePath) else {\n            throw PayloadSchemeError.missingResource\n        }',
+            }),
+        });
+
+        const error = await runNodeScriptExpectFailure(assertLoopbackContainmentScript, ['--root', repoDir]);
+        expect(error.stdout).toContain('missing backslash path rejection before static asset lookup');
+        expect(error.stdout).toContain('[loopback-guard] result: FAIL');
+    });
+
+    it('fails source-policy proof when static allowlist misses can fall through to asset lookup', async () => {
+        const repoDir = await makeTempDir();
+        await writeLoopbackFixture(repoDir, {
+            loopbackBody: makePayloadPathLoopbackBody({
+                decodedPathLine: 'guard let decodedPath = requestPath.removingPercentEncoding else {\n            throw LocalLoopbackPayloadServerError.invalidURL\n        }',
+                backslashGuard: 'guard !candidatePath.contains("\\\\") else {\n            throw PayloadSchemeError.disallowedPath\n        }',
+                dotSegmentGuard: 'for part in parts where part == "." || part == ".." {\n            throw PayloadSchemeError.disallowedPath\n        }',
+                allowlistGuard: 'return relativePath',
+            }),
+        });
+
+        const error = await runNodeScriptExpectFailure(assertLoopbackContainmentScript, ['--root', repoDir]);
+        expect(error.stdout).toContain('missing static allowlist miss rejection before serving content');
+        expect(error.stdout).toContain('[loopback-guard] result: FAIL');
+    });
+
+    it('fails source-policy proof when allowlisted payload files are not revalidated against the resolved payload root', async () => {
+        const repoDir = await makeTempDir();
+        await writeLoopbackFixture(repoDir, {
+            loopbackBody: makePayloadPathLoopbackBody({
+                decodedPathLine: 'guard let decodedPath = requestPath.removingPercentEncoding else {\n            throw LocalLoopbackPayloadServerError.invalidURL\n        }',
+                backslashGuard: 'guard !candidatePath.contains("\\\\") else {\n            throw PayloadSchemeError.disallowedPath\n        }',
+                dotSegmentGuard: 'for part in parts where part == "." || part == ".." {\n            throw PayloadSchemeError.disallowedPath\n        }',
+                allowlistGuard: 'guard allowedPayloadPaths.contains(relativePath) else {\n            throw PayloadSchemeError.missingResource\n        }',
+                containmentValidationLine: '',
+            }),
+        });
+
+        const error = await runNodeScriptExpectFailure(assertLoopbackContainmentScript, ['--root', repoDir]);
+        expect(error.stdout).toContain('missing symlink containment revalidation for allowlisted payload files before serving');
+        expect(error.stdout).toContain('[loopback-guard] result: FAIL');
+    });
+
+    it('fails source-policy proof when resolved payload paths are not confined to the canonical payload root', async () => {
+        const repoDir = await makeTempDir();
+        await writeLoopbackFixture(repoDir, {
+            loopbackBody: makePayloadPathLoopbackBody({
+                decodedPathLine: 'guard let decodedPath = requestPath.removingPercentEncoding else {\n            throw LocalLoopbackPayloadServerError.invalidURL\n        }',
+                backslashGuard: 'guard !candidatePath.contains("\\\\") else {\n            throw PayloadSchemeError.disallowedPath\n        }',
+                dotSegmentGuard: 'for part in parts where part == "." || part == ".." {\n            throw PayloadSchemeError.disallowedPath\n        }',
+                allowlistGuard: 'guard allowedPayloadPaths.contains(relativePath) else {\n            throw PayloadSchemeError.missingResource\n        }',
+                containmentValidationBody: `
+    func validateContainedPayloadFile(relativePath: String) throws {
+        let fileURL = payloadDirectory.appendingPathComponent(relativePath, isDirectory: false)
+        let rootPath = payloadDirectory.path
+        let resolvedPath = fileURL.resolvingSymlinksInPath().standardizedFileURL.path
+        let resourceValues = try fileURL.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+        if resourceValues.isDirectory == true || resourceValues.isSymbolicLink == true {
+            throw PayloadSchemeError.disallowedPath
+        }
+    }
+`,
+            }),
+        });
+
+        const error = await runNodeScriptExpectFailure(assertLoopbackContainmentScript, ['--root', repoDir]);
+        expect(error.stdout).toContain('missing canonical payload root resolution for symlink containment');
+        expect(error.stdout).toContain('missing resolved-path containment rejection for symlink escapes');
+        expect(error.stdout).toContain('[loopback-guard] result: FAIL');
+    });
+
+    it('fails when loopback origin matching ignores scheme host and port', async () => {
+        const repoDir = await makeTempDir();
+        await writeLoopbackFixture(repoDir, {
+            loopbackBody: `
+struct LoopbackOrigin {
+    let pathPrefix: String
+
+    func matches(url: URL) -> Bool {
+        let path = url.path.isEmpty ? "/" : url.path
+        return path == pathPrefix || path.hasPrefix("\\(pathPrefix)/")
+    }
+}
+
+enum LocalLoopbackPayloadServerError: Error {
+    case invalidURL
+    case missingNoncePrefix
+    case queryStringNotAllowed
+}
+
+final class LocalLoopbackPayloadServer {
+    init(originHost: String = AppConfig.Loopback.host) {
+        let parameters = NWParameters.tcp
+        let port = NWEndpoint.Port(rawValue: 0)!
+        parameters.requiredLocalEndpoint = .hostPort(host: NWEndpoint.Host(originHost), port: port)
+        AppLogger.notice("[Loopback] loopback.server.ready host=\\"\\(originHost)\\"", category: AppConfig.Log.loopback)
+    }
+
+    func serve(request: Request, absoluteComponents: URLComponents, normalizedTarget: String, relativePath: String) throws {
+        if absoluteComponents.percentEncodedQuery != nil {
+            throw LocalLoopbackPayloadServerError.queryStringNotAllowed
+        }
+        if normalizedTarget.contains("?") {
+            throw LocalLoopbackPayloadServerError.queryStringNotAllowed
+        }
+        if absoluteComponents.percentEncodedFragment != nil {
+            throw LocalLoopbackPayloadServerError.invalidURL
+        }
+        if normalizedTarget.contains("#") {
+            throw LocalLoopbackPayloadServerError.invalidURL
+        }
+        guard request.method == "GET" || request.method == "HEAD" else { return }
+        guard allowedPayloadPaths.contains(relativePath) else { return }
+        _ = fileURL.resolvingSymlinksInPath()
+        guard decodedPath == currentOrigin.pathPrefix || decodedPath.hasPrefix("\\(currentOrigin.pathPrefix)/") else {
+            throw LocalLoopbackPayloadServerError.missingNoncePrefix
+        }
+    }
+
+    func displayURL(components: inout URLComponents) {
+        components.percentEncodedQuery = nil
+    }
+
+    func generateNonce() {
+        _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+    }
+}
+`,
+        });
+
+        const error = await runNodeScriptExpectFailure(assertLoopbackContainmentScript, ['--root', repoDir]);
+        expect(error.stdout).toContain('LoopbackOrigin.matches must require the exact loopback scheme');
+        expect(error.stdout).toContain('LoopbackOrigin.matches must require the exact loopback host');
+        expect(error.stdout).toContain('LoopbackOrigin.matches must require the exact loopback port');
+        expect(error.stdout).toContain('[loopback-guard] result: FAIL');
+    });
+
     it('fails when the bind host is 0.0.0.0', async () => {
         const repoDir = await makeTempDir();
         await writeLoopbackFixture(repoDir, { host: '0.0.0.0' });
@@ -458,6 +1016,177 @@ describe('assert-loopback-containment.mjs', () => {
         const error = await runNodeScriptExpectFailure(assertLoopbackContainmentScript, ['--root', repoDir]);
         expect(error.stdout).toContain('loopback host must be exactly 127.0.0.1');
         expect(error.stdout).toContain('must not bind 0.0.0.0');
+        expect(error.stdout).toContain('[loopback-guard] result: FAIL');
+    });
+
+    it('fails when localhost, IPv6, private, or external hosts replace 127.0.0.1', async () => {
+        const cases = [
+            ['localhost', 'loopback host must use 127.0.0.1 instead of localhost'],
+            ['::1', null],
+            ['[::1]', null],
+            ['192.168.0.1', null],
+            ['10.0.0.1', null],
+            ['172.16.0.1', null],
+            ['example.com', null],
+        ];
+
+        for (const [host, extraMessage] of cases) {
+            const repoDir = await makeTempDir();
+            await writeLoopbackFixture(repoDir, { host });
+
+            const error = await runNodeScriptExpectFailure(assertLoopbackContainmentScript, ['--root', repoDir]);
+            expect(error.stdout).toContain(`loopback host must be exactly 127.0.0.1, found ${host}`);
+            if (extraMessage) {
+                expect(error.stdout).toContain(extraMessage);
+            }
+            expect(error.stdout).toContain('[loopback-guard] result: FAIL');
+        }
+    });
+
+    it('fails when loopback origin matching ignores the exact host', async () => {
+        const repoDir = await makeTempDir();
+        await writeLoopbackFixture(repoDir, {
+            loopbackBody: makePayloadPathLoopbackBody({
+                decodedPathLine: 'guard let decodedPath = requestPath.removingPercentEncoding else {\n            throw LocalLoopbackPayloadServerError.invalidURL\n        }',
+                backslashGuard: 'guard !candidatePath.contains("\\\\") else {\n            throw PayloadSchemeError.disallowedPath\n        }',
+                dotSegmentGuard: 'for part in parts where part == "." || part == ".." {\n            throw PayloadSchemeError.disallowedPath\n        }',
+                allowlistGuard: 'guard allowedPayloadPaths.contains(relativePath) else {\n            throw PayloadSchemeError.missingResource\n        }',
+                matchesGuard: `guard url.scheme?.lowercased() == scheme,
+              url.port == Int(port)
+        else {
+            return false
+        }`,
+            }),
+        });
+
+        const error = await runNodeScriptExpectFailure(assertLoopbackContainmentScript, ['--root', repoDir]);
+        expect(error.stdout).toContain('LoopbackOrigin.matches must require the exact loopback host');
+        expect(error.stdout).toContain('[loopback-guard] result: FAIL');
+    });
+
+    it('fails when loopback server uses a fixed fallback port instead of port 0', async () => {
+        const repoDir = await makeTempDir();
+        await writeLoopbackFixture(repoDir, {
+            loopbackBody: makePayloadPathLoopbackBody({
+                decodedPathLine: 'guard let decodedPath = requestPath.removingPercentEncoding else {\n            throw LocalLoopbackPayloadServerError.invalidURL\n        }',
+                backslashGuard: 'guard !candidatePath.contains("\\\\") else {\n            throw PayloadSchemeError.disallowedPath\n        }',
+                dotSegmentGuard: 'for part in parts where part == "." || part == ".." {\n            throw PayloadSchemeError.disallowedPath\n        }',
+                allowlistGuard: 'guard allowedPayloadPaths.contains(relativePath) else {\n            throw PayloadSchemeError.missingResource\n        }',
+                portLiteral: '8080',
+            }),
+        });
+
+        const error = await runNodeScriptExpectFailure(assertLoopbackContainmentScript, ['--root', repoDir]);
+        expect(error.stdout).toContain('loopback server must request an OS-assigned random port with port 0');
+        expect(error.stdout).toContain('loopback server must not use a fixed fallback port');
+        expect(error.stdout).toContain('[loopback-guard] result: FAIL');
+    });
+
+    it('fails source-policy proof when HEAD responses do not suppress the body', async () => {
+        const repoDir = await makeTempDir();
+        await writeLoopbackFixture(repoDir, {
+            loopbackBody: makePayloadPathLoopbackBody({
+                decodedPathLine: 'guard let decodedPath = requestPath.removingPercentEncoding else {\n            throw LocalLoopbackPayloadServerError.invalidURL\n        }',
+                backslashGuard: 'guard !candidatePath.contains("\\\\") else {\n            throw PayloadSchemeError.disallowedPath\n        }',
+                dotSegmentGuard: 'for part in parts where part == "." || part == ".." {\n            throw PayloadSchemeError.disallowedPath\n        }',
+                allowlistGuard: 'guard allowedPayloadPaths.contains(relativePath) else {\n            throw PayloadSchemeError.missingResource\n        }',
+                responseBodyExpression: 'body',
+            }),
+        });
+
+        const error = await runNodeScriptExpectFailure(assertLoopbackContainmentScript, ['--root', repoDir]);
+        expect(error.stdout).toContain('missing HEAD response body suppression');
+        expect(error.stdout).toContain('[loopback-guard] result: FAIL');
+    });
+
+    it('fails source-policy proof when non-GET/HEAD methods are not rejected explicitly', async () => {
+        const repoDir = await makeTempDir();
+        await writeLoopbackFixture(repoDir, {
+            loopbackBody: makePayloadPathLoopbackBody({
+                decodedPathLine: 'guard let decodedPath = requestPath.removingPercentEncoding else {\n            throw LocalLoopbackPayloadServerError.invalidURL\n        }',
+                backslashGuard: 'guard !candidatePath.contains("\\\\") else {\n            throw PayloadSchemeError.disallowedPath\n        }',
+                dotSegmentGuard: 'for part in parts where part == "." || part == ".." {\n            throw PayloadSchemeError.disallowedPath\n        }',
+                allowlistGuard: 'guard allowedPayloadPaths.contains(relativePath) else {\n            throw PayloadSchemeError.missingResource\n        }',
+                methodGuard: 'guard request.method == "GET" || request.method == "HEAD" else {\n            return\n        }',
+            }),
+        });
+
+        const error = await runNodeScriptExpectFailure(assertLoopbackContainmentScript, ['--root', repoDir]);
+        expect(error.stdout).toContain('missing explicit rejection path for non-GET/HEAD methods');
+        expect(error.stdout).toContain('[loopback-guard] result: FAIL');
+    });
+
+    it('fails source-policy proof when loopback server deinit does not invoke stop()', async () => {
+        const repoDir = await makeTempDir();
+        await writeLoopbackFixture(repoDir, {
+            loopbackBody: makePayloadPathLoopbackBody({
+                decodedPathLine: 'guard let decodedPath = requestPath.removingPercentEncoding else {\n            throw LocalLoopbackPayloadServerError.invalidURL\n        }',
+                backslashGuard: 'guard !candidatePath.contains("\\\\") else {\n            throw PayloadSchemeError.disallowedPath\n        }',
+                dotSegmentGuard: 'for part in parts where part == "." || part == ".." {\n            throw PayloadSchemeError.disallowedPath\n        }',
+                allowlistGuard: 'guard allowedPayloadPaths.contains(relativePath) else {\n            throw PayloadSchemeError.missingResource\n        }',
+                serverDeinitBody: '_ = 0',
+            }),
+        });
+
+        const error = await runNodeScriptExpectFailure(assertLoopbackContainmentScript, ['--root', repoDir]);
+        expect(error.stdout).toContain('loopback server must invoke stop() from deinit for teardown cleanup');
+        expect(error.stdout).toContain('[loopback-guard] result: FAIL');
+    });
+
+    it('fails source-policy proof when loopback stop() does not cancel the listener', async () => {
+        const repoDir = await makeTempDir();
+        await writeLoopbackFixture(repoDir, {
+            loopbackBody: makePayloadPathLoopbackBody({
+                decodedPathLine: 'guard let decodedPath = requestPath.removingPercentEncoding else {\n            throw LocalLoopbackPayloadServerError.invalidURL\n        }',
+                backslashGuard: 'guard !candidatePath.contains("\\\\") else {\n            throw PayloadSchemeError.disallowedPath\n        }',
+                dotSegmentGuard: 'for part in parts where part == "." || part == ".." {\n            throw PayloadSchemeError.disallowedPath\n        }',
+                allowlistGuard: 'guard allowedPayloadPaths.contains(relativePath) else {\n            throw PayloadSchemeError.missingResource\n        }',
+                stopBody: 'guard isRunning else { return }\n        isRunning = false',
+            }),
+        });
+
+        const error = await runNodeScriptExpectFailure(assertLoopbackContainmentScript, ['--root', repoDir]);
+        expect(error.stdout).toContain('loopback server stop() must cancel the Network listener');
+        expect(error.stdout).toContain('[loopback-guard] result: FAIL');
+    });
+
+    it('fails source-policy proof when web container teardown does not stop the loopback server', async () => {
+        const repoDir = await makeTempDir();
+        await writeLoopbackFixture(repoDir, {
+            webContainerBody: `
+final class WebContainerViewController {
+    deinit {
+        webView?.configuration.userContentController.removeScriptMessageHandler(
+            forName: AppConfig.Bridge.handlerName)
+    }
+
+    func resolveInitialPayloadTarget() {
+        let originSelection = AppConfig.Loopback.originSelection
+        _ = originSelection
+        _ = WebNavigationPolicy(allowedLoopbackOrigin: initialPayloadTarget.loopbackOrigin)
+        _ = LoopbackRuntimeOrigin(customScheme: false)
+        _ = ["customScheme": false, "networkAllowed": false, "bundledAssetsOnly": true]
+    }
+
+    func resolveAppSchemeTarget(reason: String = "app_local_default") {
+        AppLogger.notice("[WebContainer] origin_mode selected=\\"app-local\\" reason=\\"\\(reason)\\"", category: AppConfig.Log.webContainer)
+    }
+
+    func resolveLoopbackTarget(reason: String) {
+        do {
+            _ = LocalLoopbackPayloadServer()
+        } catch {
+            AppLogger.error("[Loopback] loopback.server.error error_kind=\\"startup_failed\\" error=\\"\\(error.localizedDescription)\\" fallback=\\"app_scheme\\" reason=\\"\\(reason)\\"", category: AppConfig.Log.loopback)
+        }
+
+        _ = resolveAppSchemeTarget(reason: "loopback_startup_failed")
+    }
+}
+`,
+        });
+
+        const error = await runNodeScriptExpectFailure(assertLoopbackContainmentScript, ['--root', repoDir]);
+        expect(error.stdout).toContain('web container teardown must stop the loopback server during deinit');
         expect(error.stdout).toContain('[loopback-guard] result: FAIL');
     });
 

@@ -277,6 +277,36 @@ function validateBindHosts(appConfigFile, loopbackServerFile) {
         );
     }
 
+    if (/NWEndpoint\.Port\(rawValue:\s*(8080|3000|5000|54104)\)/.test(loopbackServerFile.content)) {
+        violations.push(
+            violation(
+                loopbackServerFile.relPath,
+                'loopback server must not use a fixed fallback port',
+                expected
+            )
+        );
+    }
+
+    if (!/guard let port = self\.listener\.port\?\.rawValue else \{[\s\S]*LocalLoopbackPayloadServerError\.invalidListenerPort/.test(loopbackServerFile.content)) {
+        violations.push(
+            violation(
+                loopbackServerFile.relPath,
+                'loopback server must read the actual listener-selected port before constructing the active origin',
+                expected
+            )
+        );
+    }
+
+    if (!/let origin = LoopbackOrigin\([\s\S]*port: port,[\s\S]*nonce: self\.nonce\)/.test(loopbackServerFile.content)) {
+        violations.push(
+            violation(
+                loopbackServerFile.relPath,
+                'loopback server must build the active origin from the actual selected port, not a hardcoded or requested port',
+                expected
+            )
+        );
+    }
+
     return violations;
 }
 
@@ -288,14 +318,70 @@ function validateHardenedServing(appConfigFile, webContainerFile, loopbackServer
         requiredProbe(appConfigFile, /static let pathPrefixSegment = "_fortios"/, 'missing fixed hardened path-prefix segment'),
         requiredProbe(loopbackServerFile, /SecRandomCopyBytes\(kSecRandomDefault, bytes\.count, &bytes\)/, 'missing cryptographic per-launch nonce generation'),
         requiredProbe(loopbackServerFile, /missingNoncePrefix/, 'missing rejection for requests without the nonce path prefix'),
+        requiredProbe(
+            loopbackServerFile,
+            /guard decodedPath == currentOrigin\.pathPrefix[\s\S]*throw LocalLoopbackPayloadServerError\.missingNoncePrefix/,
+            'missing or wrong nonce paths must be rejected before asset lookup'
+        ),
+        requiredProbe(loopbackServerFile, /requestPath\.removingPercentEncoding/, 'missing percent-decoded request path handling before encoded traversal rejection'),
+        requiredProbe(
+            loopbackServerFile,
+            /guard !candidatePath\.contains\("\\\\"\) else \{[\s\S]*throw PayloadSchemeError\.disallowedPath/,
+            'missing backslash path rejection before static asset lookup'
+        ),
+        requiredProbe(
+            loopbackServerFile,
+            /for part in parts where part == "\." \|\| part == "\.\." \{[\s\S]*throw PayloadSchemeError\.disallowedPath/,
+            'missing dot-segment traversal rejection before static asset lookup'
+        ),
+        requiredProbe(
+            loopbackServerFile,
+            /guard allowedPayloadPaths\.contains\(relativePath\) else \{[\s\S]*throw PayloadSchemeError\.missingResource/,
+            'missing static allowlist miss rejection before serving content'
+        ),
         requiredProbe(loopbackServerFile, /queryStringNotAllowed/, 'missing explicit query-string rejection policy'),
         requiredProbe(loopbackServerFile, /percentEncodedQuery\s*!=\s*nil/, 'missing absolute-URL query rejection'),
         requiredProbe(loopbackServerFile, /normalizedTarget\.contains\("\?"\)/, 'missing origin-form query rejection'),
         requiredProbe(loopbackServerFile, /percentEncodedFragment\s*!=\s*nil/, 'missing absolute-URL fragment rejection'),
         requiredProbe(loopbackServerFile, /normalizedTarget\.contains\("#"\)/, 'missing origin-form fragment rejection'),
         requiredProbe(loopbackServerFile, /request\.method == "GET" \|\| request\.method == "HEAD"/, 'missing GET and HEAD method allowlist'),
+        requiredProbe(
+            loopbackServerFile,
+            /guard request\.method == "GET" \|\| request\.method == "HEAD" else \{[\s\S]*throw LocalLoopbackPayloadServerError\.unsupportedMethod/,
+            'missing explicit rejection path for non-GET/HEAD methods'
+        ),
+        requiredProbe(loopbackServerFile, /body:\s*request\.method == "HEAD" \? Data\(\) : body/, 'missing HEAD response body suppression'),
         requiredProbe(loopbackServerFile, /allowedPayloadPaths\.contains\(relativePath\)/, 'missing static payload file allowlist check'),
-        requiredProbe(loopbackServerFile, /resolvingSymlinksInPath\(\)/, 'missing symlink-aware payload containment check'),
+        requiredProbe(
+            loopbackServerFile,
+            /try validateContainedPayloadFile\(relativePath: relativePath\)/,
+            'missing symlink containment revalidation for allowlisted payload files before serving'
+        ),
+        requiredProbe(
+            loopbackServerFile,
+            /let rootPath = payloadDirectory\.resolvingSymlinksInPath\(\)\.standardizedFileURL\.path/,
+            'missing canonical payload root resolution for symlink containment'
+        ),
+        requiredProbe(
+            loopbackServerFile,
+            /let resolvedPath = fileURL\.resolvingSymlinksInPath\(\)\.standardizedFileURL\.path/,
+            'missing canonical candidate path resolution for symlink containment'
+        ),
+        requiredProbe(
+            loopbackServerFile,
+            /guard resolvedPath == rootPath \|\| resolvedPath\.hasPrefix\("\\\(rootPath\)\/"\) else \{[\s\S]*throw PayloadSchemeError\.disallowedPath/,
+            'missing resolved-path containment rejection for symlink escapes'
+        ),
+        requiredProbe(
+            loopbackServerFile,
+            /resourceValues\(forKeys: \[\.?isDirectoryKey, \.?isSymbolicLinkKey\]\)/,
+            'missing leaf payload resource inspection for directory and symlink rejection'
+        ),
+        requiredProbe(
+            loopbackServerFile,
+            /resourceValues\.isDirectory == true \|\| resourceValues\.isSymbolicLink == true/,
+            'missing explicit leaf directory or symlink rejection after resolution'
+        ),
         requiredProbe(loopbackServerFile, /components\.percentEncodedQuery = nil/, 'request logging must strip query strings'),
         requiredProbe(webContainerFile, /customScheme: false/, 'loopback runtime-origin contract must report customScheme=false'),
         requiredProbe(webContainerFile, /networkAllowed": false/, 'runtime-origin contract must keep networkAllowed=false'),
@@ -303,6 +389,7 @@ function validateHardenedServing(appConfigFile, webContainerFile, loopbackServer
     ];
 
     const forbidden = [
+        forbiddenProbe(loopbackServerFile, /decodedPath\.hasPrefix\("\/_fortios\/"\)/, 'loopback server must not accept any /_fortios/<value>/ prefix without matching currentOrigin.pathPrefix'),
         forbiddenProbe(loopbackServerFile, /components\.percentEncodedQuery = absoluteComponents\.percentEncodedQuery/, 'loopback server must reject, not preserve, absolute-URL query strings'),
         forbiddenProbe(loopbackServerFile, /components\.percentEncodedQuery = String\(/, 'loopback server must reject, not preserve, origin-form query strings'),
     ];
@@ -332,6 +419,100 @@ function validateNavigationContainment(webContainerFile, loopbackServerFile) {
             violation(
                 loopbackServerFile.relPath,
                 'LoopbackOrigin.matches must require the nonce path prefix, not just host and port',
+                expected
+            )
+        );
+    }
+
+    if (!/url\.scheme\?\.lowercased\(\) == scheme/.test(loopbackServerFile.content)) {
+        violations.push(
+            violation(
+                loopbackServerFile.relPath,
+                'LoopbackOrigin.matches must require the exact loopback scheme',
+                expected
+            )
+        );
+    }
+
+    if (!/url\.host\?\.lowercased\(\) == host\.lowercased\(\)/.test(loopbackServerFile.content)) {
+        violations.push(
+            violation(
+                loopbackServerFile.relPath,
+                'LoopbackOrigin.matches must require the exact loopback host',
+                expected
+            )
+        );
+    }
+
+    if (!/url\.port == Int\(port\)/.test(loopbackServerFile.content)) {
+        violations.push(
+            violation(
+                loopbackServerFile.relPath,
+                'LoopbackOrigin.matches must require the exact loopback port',
+                expected
+            )
+        );
+    }
+
+    return violations;
+}
+
+function validateLoopbackFallbackLogging(webContainerFile) {
+    const expected = 'Loopback startup failure must fail closed to app-local and log the fallback reason.';
+    const violations = [];
+
+    if (!/loopback\.server\.error[\s\S]*fallback=\\"app_scheme\\"/.test(webContainerFile.content)) {
+        violations.push(
+            violation(
+                webContainerFile.relPath,
+                'loopback startup failure must log fallback="app_scheme"',
+                expected
+            )
+        );
+    }
+
+    if (!/resolveAppSchemeTarget\(reason: "loopback_startup_failed"\)/.test(webContainerFile.content)) {
+        violations.push(
+            violation(
+                webContainerFile.relPath,
+                'loopback startup failure must fall back via resolveAppSchemeTarget(reason: "loopback_startup_failed")',
+                expected
+            )
+        );
+    }
+
+    return violations;
+}
+
+function validateLoopbackLifecycle(webContainerFile, loopbackServerFile) {
+    const expected = 'Loopback lifecycle must expose explicit teardown and listener cancellation instead of leaving the listener running after teardown.';
+    const violations = [];
+
+    if (!/deinit\s*\{\s*stop\(\)\s*\}/.test(loopbackServerFile.content)) {
+        violations.push(
+            violation(
+                loopbackServerFile.relPath,
+                'loopback server must invoke stop() from deinit for teardown cleanup',
+                expected
+            )
+        );
+    }
+
+    if (!/func stop\(\) \{[\s\S]*listener\.cancel\(\)/.test(loopbackServerFile.content)) {
+        violations.push(
+            violation(
+                loopbackServerFile.relPath,
+                'loopback server stop() must cancel the Network listener',
+                expected
+            )
+        );
+    }
+
+    if (!/deinit \{[\s\S]*loopbackServer\?\.stop\(\)/.test(webContainerFile.content)) {
+        violations.push(
+            violation(
+                webContainerFile.relPath,
+                'web container teardown must stop the loopback server during deinit',
                 expected
             )
         );
@@ -400,6 +581,8 @@ async function main() {
         violations.push(...validateBindHosts(appConfigFile, loopbackServerFile));
         violations.push(...validateHardenedServing(appConfigFile, webContainerFile, loopbackServerFile));
         violations.push(...validateNavigationContainment(webContainerFile, loopbackServerFile));
+        violations.push(...validateLoopbackFallbackLogging(webContainerFile));
+        violations.push(...validateLoopbackLifecycle(webContainerFile, loopbackServerFile));
     }
     violations.push(...validateSensitiveLogging(loopbackServerFile));
 
