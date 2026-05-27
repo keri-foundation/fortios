@@ -306,7 +306,7 @@ Fort-ios/
 │   └── gen-build-manifest.mjs  # Generates dist/build-manifest.json
 ├── scripts/
 │   └── download-pyodide.sh     # Downloads Pyodide runtime + wheels
-├── KeriWallet/                 # Swift source (symlinks into xcodeproj/)
+├── KeriWallet/                 # Root app entry points (symlink convenience access into nested app source)
 │   ├── AppDelegate.swift
 │   ├── AppLogger.swift         # OSLog-backed structured logging
 │   ├── AppConfig.swift         # App-wide constants (schemes, limits, headers)
@@ -316,11 +316,13 @@ Fort-ios/
 │   ├── WebContainerViewController.swift
 │   ├── WebNavigationPolicy.swift   # Deny-by-default navigation allowlist
 │   └── PrivacyInfo.xcprivacy
-├── KeriWalletTests/            # Swift unit tests (swift-testing)
-├── KeriWalletUITests/          # Swift UI smoke test
+├── KeriWalletTests/            # Physical Swift unit-test source folder
+├── KeriWalletUITests/          # Physical Swift UI-test source folder
 ├── xcodeproj/                  # Xcode project + mirrored Swift source
 │   └── KeriWallet/
-│       ├── KeriWallet/         # Mirror of KeriWallet/ above (symlinked)
+│       ├── KeriWallet/         # Canonical app source tree used by the Xcode project
+│       ├── KeriWalletTests     # Symlink entry point back to root KeriWalletTests/
+│       ├── KeriWalletUITests   # Symlink entry point back to root KeriWalletUITests/
 │       └── KeriWallet.xcodeproj
 ├── WebPayload/                 # Synced dist/ output — Xcode bundles this
 ├── WebPayloadOverride/         # Debug-only local override (NOT YET IMPLEMENTED)
@@ -338,7 +340,7 @@ Fort-ios/
 └── .tool-versions              # Pins Node 22.12.0 via mise
 ```
 
-> **Swift source symlinks:** `KeriWallet/*.swift` are symlinks into `xcodeproj/KeriWallet/KeriWallet/`. Edit either location — they are the same file. When adding a new Swift file, create it inside `xcodeproj/…/KeriWallet/`, then add a symlink: `ln -s ../xcodeproj/KeriWallet/KeriWallet/NewFile.swift KeriWallet/NewFile.swift`.
+> **Hybrid Swift/Xcode layout:** The Xcode project lives at `xcodeproj/KeriWallet/KeriWallet.xcodeproj`. App source authority is the nested `xcodeproj/KeriWallet/KeriWallet/` tree, and root `KeriWallet/*.swift` entries are symlink convenience paths into that app tree. Unit and UI test authority currently lives in root `KeriWalletTests/` and `KeriWalletUITests/`, while the nested `xcodeproj/KeriWallet/KeriWalletTests` and `xcodeproj/KeriWallet/KeriWalletUITests` paths are symlink entry points back to those root test folders. Do not delete the root test folders as duplicates, and do not flatten or remove symlinks without a dedicated `project.pbxproj`-aware migration.
 
 ---
 
