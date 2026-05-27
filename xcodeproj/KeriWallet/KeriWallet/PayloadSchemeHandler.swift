@@ -339,19 +339,20 @@ final class PayloadSchemeHandler: NSObject, WKURLSchemeHandler {
         guard let assetKind = WKRuntimeTraceAssetLog.assetKind(for: candidatePath) else { return }
 
         let label = WKRuntimeTraceAssetLog.label(for: assetKind)
-        let fields = [
-            "request_id": requestID,
-            "phase": phase,
-            "asset_kind": assetKind,
-            "url": url?.absoluteString ?? "",
-            "path": requestPath,
-            "normalized_path": normalizedPath ?? "",
-            "mime": mime ?? "",
-            "bytes": bytes.map(String.init) ?? "",
-            "error_kind": errorKind ?? "",
+        let rawFields: [(String, String)] = [
+            ("request_id", requestID),
+            ("phase", phase),
+            ("asset_kind", assetKind),
+            ("url", url?.absoluteString ?? ""),
+            ("path", requestPath),
+            ("normalized_path", normalizedPath ?? ""),
+            ("mime", mime ?? ""),
+            ("bytes", bytes.map(String.init) ?? ""),
+            ("error_kind", errorKind ?? ""),
         ]
-            .filter { !$0.value.isEmpty }
-            .sorted { $0.key < $1.key }
+        let nonEmptyFields = rawFields.filter { !$0.1.isEmpty }
+        let sortedFields = nonEmptyFields.sorted { $0.0 < $1.0 }
+        let fields = sortedFields
             .map { key, value in "\(key)=\(quoted(value))" }
             .joined(separator: " ")
 
