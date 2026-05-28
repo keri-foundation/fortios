@@ -11,15 +11,23 @@ function parseArgs(argv) {
         assetPath: null,
     };
 
+    function getRequiredOptionValue(index, optionName) {
+        const value = argv[index + 1];
+        if (!value || value.startsWith('--')) {
+            throw new Error(`missing value for ${optionName}`);
+        }
+        return value;
+    }
+
     for (let index = 0; index < argv.length; index += 1) {
         const arg = argv[index];
         if (arg === '--worker') {
-            options.workerPath = path.resolve(argv[index + 1]);
+            options.workerPath = path.resolve(getRequiredOptionValue(index, arg));
             index += 1;
             continue;
         }
         if (arg === '--asset') {
-            options.assetPath = path.resolve(argv[index + 1]);
+            options.assetPath = path.resolve(getRequiredOptionValue(index, arg));
             index += 1;
             continue;
         }
@@ -109,7 +117,11 @@ async function main() {
 
     const workerResult = detectWorkerMode(workerSource);
     const assetResult = detectPyodideAssetMode(assetSource);
-    const passed = !(workerResult.mode === 'classic' && assetResult.mode === 'esm');
+    const passed = !(
+        (workerResult.mode === 'classic' && assetResult.mode === 'esm')
+        || workerResult.mode === 'unknown'
+        || assetResult.mode === 'unknown'
+    );
 
     printResult({ workerPath, assetPath: resolvedAssetPath, workerResult, assetResult, passed });
 
