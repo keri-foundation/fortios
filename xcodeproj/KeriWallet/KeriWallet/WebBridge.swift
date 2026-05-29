@@ -39,6 +39,12 @@ struct FortWebRuntimeDiagnostic: Equatable {
     let event: String
     let level: String?
     let state: String?
+    let method: String?
+    let requestID: String?
+    let priorRequestID: String?
+    let timeoutMs: String?
+    let reason: String?
+    let code: String?
 
     static func parse(_ message: String) -> FortWebRuntimeDiagnostic? {
         guard message.hasPrefix("[fortweb.runtime]") else { return nil }
@@ -49,7 +55,13 @@ struct FortWebRuntimeDiagnostic: Equatable {
         return FortWebRuntimeDiagnostic(
             event: event,
             level: field("level", in: message),
-            state: field("state", in: message))
+            state: field("state", in: message),
+            method: field("method", in: message),
+            requestID: field("request_id", in: message),
+            priorRequestID: field("prior_request_id", in: message),
+            timeoutMs: field("timeout_ms", in: message),
+            reason: field("reason", in: message),
+            code: field("code", in: message))
     }
 
     private static func field(_ name: String, in message: String) -> String? {
@@ -77,7 +89,10 @@ final class WebBridge: NSObject, WKScriptMessageHandler {
     /// Called on the main thread whenever a `crypto_result` message arrives from JS.
     /// Set this before the WebView loads its first URL.
     var onCryptoResult: ((CryptoResultPayload) -> Void)?
+    var onRuntimeDiagnostic: ((FortWebRuntimeDiagnostic) -> Void)?
     private var hasLoggedFirstReceipt = false
+    private var pendingRequestIDs: Set<String> = []
+    private var requestStartedAt: [String: Date] = [:]
 
     private static let lifecycleNoticeStates: Set<String> = [
         "boot",
@@ -244,6 +259,58 @@ final class WebBridge: NSObject, WKScriptMessageHandler {
         )
     }
 
+    private func updateRuntimeRequestDiagnosticsIfNeeded(_ diagnostic: FortWebRuntimeDiagnostic) {
+        if diagnostic.event == "worker_invalidation" {
+            AppLogger.warning(
+                "[WebBridge] runtime worker invalidation reason=\(diagnostic.reason ?? "") pending_count=\(pendingRequestIDs.count)",
+                category: AppConfig.Log.webBridge)
+            return
+        }
+
+        guard diagnostic.method == "vaults.create", let requestID = diagnostic.requestID, !requestID.isEmpty
+        else {
+            return
+        }
+
+        let pendingBefore = pendingRequestIDs.count
+        switch diagnostic.event {
+        case "request_start":
+            pendingRequestIDs.insert(requestID)
+            requestStartedAt[requestID] = Date()
+            AppLogger.notice(
+                "[WebBridge] vaults.create dispatch request_id=\(requestID) timeout_ms=\(diagnostic.timeoutMs ?? "") pending_before=\(pendingBefore) pending_after=\(pendingRequestIDs.count)",
+                category: AppConfig.Log.webBridge)
+
+        case "request_timeout":
+            let duration = durationSinceStart(requestID)
+            AppLogger.warning(
+                "[WebBridge] vaults.create timeout request_id=\(requestID) timeout_ms=\(diagnostic.timeoutMs ?? "") duration_ms=\(duration) pending_before=\(pendingBefore) pending_after=\(pendingRequestIDs.count)",
+                category: AppConfig.Log.webBridge)
+
+        case "request_end", "terminal_failure":
+            let duration = durationSinceStart(requestID)
+            pendingRequestIDs.remove(requestID)
+            requestStartedAt.removeValue(forKey: requestID)
+
+            let prior = diagnostic.priorRequestID ?? ""
+            let code = diagnostic.code ?? ""
+            AppLogger.notice(
+                "[WebBridge] vaults.create terminal event=\(diagnostic.event) request_id=\(requestID) prior_request_id=\(prior) code=\(code) duration_ms=\(duration) pending_before=\(pendingBefore) pending_after=\(pendingRequestIDs.count)",
+                category: AppConfig.Log.webBridge)
+
+        default:
+            break
+        }
+    }
+
+    private func durationSinceStart(_ requestID: String) -> Int {
+        guard let startedAt = requestStartedAt[requestID] else {
+            return -1
+        }
+
+        return max(0, Int(Date().timeIntervalSince(startedAt) * 1000))
+    }
+
     private static func formattedFields(_ fields: [String: String]) -> String {
         fields
             .filter { !$0.value.isEmpty }
@@ -288,7 +355,13 @@ final class WebBridge: NSObject, WKScriptMessageHandler {
         logFirstReceiptIfNeeded(envelope)
 
         switch envelope.type {
-        case .jsError, .unhandledRejection, .log, .lifecycle:
+        case .jsError, .unhandledRejection, .lifecycle:
+            log(disposition: Self.logDisposition(for: envelope))
+        case .log:
+            if let diagnostic = FortWebRuntimeDiagnostic.parse(envelope.message) {
+                updateRuntimeRequestDiagnosticsIfNeeded(diagnostic)
+                onRuntimeDiagnostic?(diagnostic)
+            }
             log(disposition: Self.logDisposition(for: envelope))
         case .cryptoResult:
             if let callback = onCryptoResult {

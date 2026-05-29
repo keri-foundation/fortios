@@ -402,16 +402,15 @@ final class KeriWalletUITests: XCTestCase {
                 return false
             }
 
-            bringElementIntoViewIfNeeded(passcodeField, within: webView)
-            focusCreateVaultPasscodeField(passcodeField, keyboard: keyboard, attempt: attempt)
-
-            guard keyboard.waitForExistence(timeout: 5) else {
-                continue
+            if attempt == 1, !advanceCreateVaultFocusWithKeyboardToolbar(to: passcodeField) {
+                bringElementIntoViewIfNeeded(passcodeField, within: webView)
+                focusCreateVaultPasscodeField(passcodeField, keyboard: keyboard, attempt: attempt)
+            } else if attempt > 1 {
+                bringElementIntoViewIfNeeded(passcodeField, within: webView)
+                focusCreateVaultPasscodeField(passcodeField, keyboard: keyboard, attempt: attempt)
             }
 
-            guard secureFieldAppearsFocused(passcodeField) else {
-                continue
-            }
+            _ = keyboard.waitForExistence(timeout: 5)
 
             let initialRawValue = rawFieldValue(passcodeField)
             let initialValue = normalizedFieldValue(passcodeField)
@@ -433,6 +432,26 @@ final class KeriWalletUITests: XCTestCase {
 
         attachCreateVaultDiagnostics(named: "Passcode-focus-missing")
         XCTFail("Passcode field did not gain a trustworthy focused state after semantic and coordinate taps; refusing to submit Create Vault because runtime evidence would be contaminated.")
+        return false
+    }
+
+    private func advanceCreateVaultFocusWithKeyboardToolbar(to field: XCUIElement) -> Bool {
+        guard app.keyboards.firstMatch.waitForExistence(timeout: 2) else {
+            return false
+        }
+
+        let nextCandidates = [
+            app.toolbars.buttons["Next"],
+            app.buttons["Next"],
+        ]
+
+        for nextButton in nextCandidates where nextButton.exists && nextButton.isHittable {
+            // WKWebView secure fields did not take text focus from direct XCTest taps;
+            // the keyboard toolbar is the user-visible transition from Name to Passcode.
+            nextButton.tap()
+            return field.wait(for: \.hasFocus, toEqual: true, timeout: 2)
+        }
+
         return false
     }
 
@@ -468,16 +487,7 @@ final class KeriWalletUITests: XCTestCase {
     }
 
     private func secureFieldAppearsFocused(_ field: XCUIElement) -> Bool {
-        let rawValue = rawFieldValue(field).trimmingCharacters(in: .whitespacesAndNewlines)
-        if !rawValue.isEmpty && rawValue != "Passcode" && rawValue != "Secure Text Field" {
-            return true
-        }
-
-        return createVaultFocusHints()
-            .components(separatedBy: .newlines)
-            .contains { line in
-                line.contains("SecureTextField") && line.contains("label: 'Passcode'") && line.contains("Focused")
-            }
+        field.exists && field.hasFocus
     }
 
     @discardableResult
@@ -510,7 +520,7 @@ final class KeriWalletUITests: XCTestCase {
             )
         }
 
-        app.typeText(text)
+        field.typeText(text)
         return true
     }
 

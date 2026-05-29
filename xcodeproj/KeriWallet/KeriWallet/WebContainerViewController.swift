@@ -38,6 +38,10 @@ final class WebContainerViewController: UIViewController {
                 category: AppConfig.Log.webContainer)
         }
 
+            bridge.onRuntimeDiagnostic = { [weak self] diagnostic in
+                self?.logCreateRuntimeContextIfNeeded(diagnostic)
+            }
+
         let initialPayloadTarget = resolveInitialPayloadTarget()
         self.loopbackServer = initialPayloadTarget.server
 
@@ -307,6 +311,23 @@ final class WebContainerViewController: UIViewController {
             AppLogger.warning(
                 "[WebContainer] storage canary returned unexpected marker=\(String(describing: result))",
                 category: AppConfig.Log.webContainer)
+        }
+    }
+
+    private func logCreateRuntimeContextIfNeeded(_ diagnostic: FortWebRuntimeDiagnostic) {
+        guard diagnostic.method == "vaults.create" else { return }
+
+        switch diagnostic.event {
+        case "request_start", "request_timeout", "request_end", "terminal_failure":
+            let pageURL = webView?.url?.absoluteString ?? ""
+            let originSelection = AppConfig.Loopback.originSelection
+            let originMode = originSelection.mode == .loopback ? "loopback" : "app-local"
+
+            AppLogger.notice(
+                "[WebContainer] vaults.create context event=\(diagnostic.event) request_id=\(diagnostic.requestID ?? "") page_url=\(pageURL) origin_mode=\(originMode) loopback_active=\(AppConfig.Loopback.isEnabled ? "true" : "false") file_origin_debug=\(AppConfig.FileOrigin.isEnabled ? "true" : "false")",
+                category: AppConfig.Log.webContainer)
+        default:
+            break
         }
     }
 

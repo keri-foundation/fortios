@@ -9,15 +9,20 @@ FORTWEB_FETCH ?= 0
 FORTWEB_REF ?= 214643f4fa907061334c09c8297c4d1e59f18f45
 FORTWEB_REMOTE ?= https://github.com/keri-foundation/fortweb.git
 SIMULATOR_NAME ?= iPhone 17 Pro
-SIMULATOR_OS   ?= auto
+SIMULATOR_OS   ?= 26.0
 SIMULATOR_UDID ?=
+SIMULATOR_DESTINATION_ARCH ?= arm64
 ifneq ($(strip $(SIMULATOR_UDID)),)
 SIMULATOR_DEVICE := $(SIMULATOR_UDID)
 else
 SIMULATOR_DEVICE := $(shell bash scripts/resolve-simulator-udid.sh "$(SIMULATOR_NAME)" "$(SIMULATOR_OS)" 2>/dev/null)
 endif
 ifneq ($(strip $(SIMULATOR_DEVICE)),)
+ifneq ($(strip $(SIMULATOR_DESTINATION_ARCH)),)
+SIMULATOR_DEST := platform=iOS Simulator,id=$(SIMULATOR_DEVICE),arch=$(SIMULATOR_DESTINATION_ARCH)
+else
 SIMULATOR_DEST := platform=iOS Simulator,id=$(SIMULATOR_DEVICE)
+endif
 else
 SIMULATOR_DEST := platform=iOS Simulator,name=$(SIMULATOR_NAME)
 endif
@@ -27,11 +32,12 @@ TEST_RESULTS  := build/TestResults.xcresult
 ARCHIVE_PATH  := build/KeriWallet.xcarchive
 EXPORT_DIR    := build/export
 EXPORT_OPTS   := ExportOptions.plist
+TEST_ONLY     ?=
 SIM_APP_PATH  := $(SIM_DERIVED_DATA)/Build/Products/Debug-iphonesimulator/KeriWallet.app
 DEVICE_APP_PATH := $(DEVICE_DERIVED_DATA)/Build/Products/Debug-iphoneos/KeriWallet.app
 DEVICE_REF    ?=
 
-.PHONY: help setup pyodide sync sync-fortweb payload-static-guards payload-contract ios-doctor ios-list-sims ios-list-devices require-simulator require-device-ref focus-sim build build-sim install-sim launch-sim run-sim dev-sim build-device install-device launch-device run-device dev-device parity-smoke logs-sim logs-device test-swift test-ts test-e2e test-e2e-slow test-all bridge-check lint lint-ts open clean archive export upload
+.PHONY: help setup pyodide sync sync-fortweb payload-static-guards payload-contract ios-doctor ios-list-sims ios-list-devices require-simulator require-device-ref sim-status sim-guard sim-reset-app-data ai-pr30-context-print ai-pr30-context-guard ai-artifacts-dry-run ai-artifacts-quarantine focus-sim build build-sim install-sim launch-sim run-sim dev-sim build-device install-device launch-device run-device dev-device parity-smoke logs-sim logs-device test-swift swift-ui-test swift-tests-ci test-ts test-e2e test-e2e-slow test-all bridge-check lint lint-ts open clean archive export upload
 
 help: ## Show available make targets
 	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | \
@@ -134,6 +140,35 @@ ios-doctor: ## Show Xcode, simulator, payload-source, and physical-device readin
 	@printf '\nPhysical devices:\n'
 	@xcrun devicectl list devices || echo "warning: no physical device available via CoreDevice"
 
+sim-status: ## Show read-only simulator guardrail status for the configured destination
+	@bash scripts/guard-simulator-state.sh status "$(SIMULATOR_NAME)" "$(SIMULATOR_OS)" "$(SIMULATOR_DEVICE)"
+
+sim-guard: require-simulator ## Fail closed when simulator state is ambiguous or contaminated
+	@bash scripts/guard-simulator-state.sh guard "$(SIMULATOR_NAME)" "$(SIMULATOR_OS)" "$(SIMULATOR_DEVICE)"
+
+sim-reset-app-data: require-simulator ## Reset only KeriWallet app data on the resolved simulator
+	@echo "[sim-reset-app-data] simulator_udid=$(SIMULATOR_DEVICE) bundle_id=$(APP_BUNDLE_ID)"
+	@xcrun simctl terminate "$(SIMULATOR_DEVICE)" "$(APP_BUNDLE_ID)" >/dev/null 2>&1 || true
+	@xcrun simctl uninstall "$(SIMULATOR_DEVICE)" "$(APP_BUNDLE_ID)" >/dev/null 2>&1 || true
+	@echo "[sim-reset-app-data] completed simulator_udid=$(SIMULATOR_DEVICE) bundle_id=$(APP_BUNDLE_ID)"
+
+ai-pr30-context-print: ## Print canonical PR30 context details used by guard checks
+	@bash scripts/assert-current-pr30-context.sh | sed -n '1,8p'
+
+ai-pr30-context-guard: ## Fail closed if current branch/head/remote/webpayload drift from canonical PR30 context
+	@bash scripts/assert-current-pr30-context.sh
+
+ai-artifacts-dry-run: ## List stale AI artifact candidates (no file mutations)
+	@bash scripts/list-stale-ai-artifacts.sh list
+
+ai-artifacts-quarantine: ## Move stale AI artifact candidates into tmp quarantine (requires CONFIRM=quarantine)
+	@if [ "$(CONFIRM)" != "quarantine" ]; then \
+		echo "ERROR: refusing quarantine without CONFIRM=quarantine"; \
+		echo "Run: make ai-artifacts-quarantine CONFIRM=quarantine"; \
+		exit 1; \
+	fi
+	@bash scripts/list-stale-ai-artifacts.sh quarantine
+
 focus-sim: require-simulator ## Boot and foreground the configured Simulator target
 	@xcrun simctl boot "$(SIMULATOR_DEVICE)" >/dev/null 2>&1 || true
 	@bash scripts/wait-for-simulator-boot.sh "$(SIMULATOR_DEVICE)" 180
@@ -216,6 +251,36 @@ test-swift: require-simulator ## Run Swift unit + UI tests on the resolved iOS S
 	  -resultBundlePath $(TEST_RESULTS) \
 	  -derivedDataPath $(SIM_DERIVED_DATA) \
 	  -parallel-testing-enabled NO
+
+swift-ui-test: require-simulator sim-guard payload-static-guards ## Run one explicit Swift test on the guarded simulator lane
+	@if [ -z "$(TEST_ONLY)" ]; then \
+		echo "ERROR: TEST_ONLY is required"; \
+		echo "Example: make swift-ui-test TEST_ONLY=KeriWalletUITests/KeriWalletUITests/test_create_vault_passcode_field_captures_input_before_submit"; \
+		exit 1; \
+	fi
+	rm -rf $(TEST_RESULTS)
+	xcodebuild test \
+	  -project $(XCODE_PROJECT) \
+	  -scheme $(SCHEME) \
+	  -configuration Debug \
+	  -destination '$(SIMULATOR_DEST)' \
+	  -destination-timeout 120 \
+	  -resultBundlePath $(TEST_RESULTS) \
+	  -derivedDataPath $(SIM_DERIVED_DATA) \
+	  -parallel-testing-enabled NO \
+	  -only-testing:$(TEST_ONLY)
+
+swift-tests-ci: require-simulator sim-guard payload-static-guards ## Run the guarded CI-like Swift lane locally without payload restaging
+	@exit_code=0; \
+	SIMULATOR_NAME="$(SIMULATOR_NAME)" SIMULATOR_OS="$(SIMULATOR_OS)" SIMULATOR_DESTINATION_ARCH="$(SIMULATOR_DESTINATION_ARCH)" DERIVED_DATA_PATH="$(SIM_DERIVED_DATA)" BUILD_RESULTS_PATH="build/TestResults-build-for-testing.xcresult" TEST_RESULTS_PATH="build/TestResults-sim.xcresult" CI_DIAGNOSTICS_DIR="build/ci-diagnostics" bash scripts/run-swift-tests-ci.sh bootstrap || exit_code=$$?; \
+	if [ $$exit_code -eq 0 ]; then \
+		SIMULATOR_NAME="$(SIMULATOR_NAME)" SIMULATOR_OS="$(SIMULATOR_OS)" SIMULATOR_DESTINATION_ARCH="$(SIMULATOR_DESTINATION_ARCH)" DERIVED_DATA_PATH="$(SIM_DERIVED_DATA)" BUILD_RESULTS_PATH="build/TestResults-build-for-testing.xcresult" TEST_RESULTS_PATH="build/TestResults-sim.xcresult" CI_DIAGNOSTICS_DIR="build/ci-diagnostics" bash scripts/run-swift-tests-ci.sh build-for-testing || exit_code=$$?; \
+	fi; \
+	if [ $$exit_code -eq 0 ]; then \
+		SIMULATOR_NAME="$(SIMULATOR_NAME)" SIMULATOR_OS="$(SIMULATOR_OS)" SIMULATOR_DESTINATION_ARCH="$(SIMULATOR_DESTINATION_ARCH)" DERIVED_DATA_PATH="$(SIM_DERIVED_DATA)" BUILD_RESULTS_PATH="build/TestResults-build-for-testing.xcresult" TEST_RESULTS_PATH="build/TestResults-sim.xcresult" CI_DIAGNOSTICS_DIR="build/ci-diagnostics" bash scripts/run-swift-tests-ci.sh test-without-building || exit_code=$$?; \
+	fi; \
+	SIMULATOR_NAME="$(SIMULATOR_NAME)" SIMULATOR_OS="$(SIMULATOR_OS)" SIMULATOR_DESTINATION_ARCH="$(SIMULATOR_DESTINATION_ARCH)" DERIVED_DATA_PATH="$(SIM_DERIVED_DATA)" BUILD_RESULTS_PATH="build/TestResults-build-for-testing.xcresult" TEST_RESULTS_PATH="build/TestResults-sim.xcresult" CI_DIAGNOSTICS_DIR="build/ci-diagnostics" bash scripts/run-swift-tests-ci.sh diagnostics || true; \
+	exit $$exit_code
 
 test-all: test-swift test-ts test-e2e ## Run Swift + TS + E2E tests
 

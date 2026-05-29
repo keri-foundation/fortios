@@ -300,17 +300,20 @@ bootstrap() {
 
 build_for_testing() {
   local simulator_udid
+  local destination
 
   ensure_paths
   prepare_result_bundle_path "${BUILD_RESULTS_PATH}"
   simulator_udid="$(resolve_simulator_udid)"
+  destination="$(test_destination "${simulator_udid}")"
 
   log_phase "build-for-testing start"
+  log_phase "using destination ${destination}"
   xcodebuild build-for-testing \
     -project "${XCODE_PROJECT}" \
     -scheme "${SCHEME}" \
     -configuration Debug \
-    -destination "id=${simulator_udid}" \
+    -destination "${destination}" \
     -destination-timeout 120 \
     -resultBundlePath "${BUILD_RESULTS_PATH}" \
     -derivedDataPath "${DERIVED_DATA_PATH}" \
