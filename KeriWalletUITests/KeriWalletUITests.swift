@@ -332,31 +332,33 @@ final class KeriWalletUITests: XCTestCase {
             return nil
         }
 
-        let nameField = webView.textFields["Name"]
+        let form = createVaultFormScope(in: webView)
+
+        let nameField = form.textFields["Name"]
         guard nameField.waitForExistence(timeout: 10) else {
             attachCreateVaultDiagnostics(named: "create-vault-name-missing")
             XCTFail("Create vault Name field did not appear")
             return nil
         }
 
-        let passcodeField = webView.secureTextFields["Passcode"]
+        let passcodeField = form.secureTextFields["Passcode"]
         guard passcodeField.waitForExistence(timeout: 10) else {
             attachCreateVaultDiagnostics(named: "create-vault-passcode-missing")
             XCTFail("Create vault Passcode field did not appear")
             return nil
         }
 
-        guard enterCreateVaultAlias(alias, in: webView) else {
+        guard enterCreateVaultAlias(alias, in: form) else {
             return nil
         }
-        guard assertNameField(alias, matches: webView.textFields["Name"], artifactName: "create-vault-name-corrupted-before-passcode") else {
+        guard assertNameField(alias, matches: form.textFields["Name"], artifactName: "create-vault-name-corrupted-before-passcode") else {
             return nil
         }
 
-        guard enterCreateVaultPasscodeSecurely(passcode, alias: alias, in: webView) else {
+        guard enterCreateVaultPasscodeSecurely(passcode, alias: alias, in: form) else {
             return nil
         }
-        guard assertNameField(alias, matches: webView.textFields["Name"], artifactName: "create-vault-name-corrupted-after-passcode") else {
+        guard assertNameField(alias, matches: form.textFields["Name"], artifactName: "create-vault-name-corrupted-after-passcode") else {
             return nil
         }
 
@@ -406,8 +408,8 @@ final class KeriWalletUITests: XCTestCase {
         return false
     }
 
-    private func enterCreateVaultAlias(_ alias: String, in webView: XCUIElement) -> Bool {
-        let nameField = webView.textFields["Name"]
+    private func enterCreateVaultAlias(_ alias: String, in form: XCUIElement) -> Bool {
+        let nameField = form.textFields["Name"]
         guard nameField.waitForExistence(timeout: 5) else {
             attachCreateVaultDiagnostics(named: "create-vault-name-missing-before-entry")
             XCTFail("Create vault Name field disappeared before alias entry")
@@ -417,12 +419,12 @@ final class KeriWalletUITests: XCTestCase {
         return focusAndType(alias, into: nameField, fieldName: "Name")
     }
 
-    private func enterCreateVaultPasscodeSecurely(_ passcode: String, alias: String, in webView: XCUIElement) -> Bool {
+    private func enterCreateVaultPasscodeSecurely(_ passcode: String, alias: String, in form: XCUIElement) -> Bool {
         let keyboard = app.keyboards.firstMatch
 
         for attempt in 1...3 {
-            let nameField = webView.textFields["Name"]
-            let passcodeField = webView.secureTextFields["Passcode"]
+            let nameField = form.textFields["Name"]
+            let passcodeField = form.secureTextFields["Passcode"]
 
             guard nameField.waitForExistence(timeout: 5), passcodeField.waitForExistence(timeout: 5) else {
                 attachCreateVaultDiagnostics(named: "Passcode-field-missing-before-entry")
@@ -431,10 +433,10 @@ final class KeriWalletUITests: XCTestCase {
             }
 
             if attempt == 1, !advanceCreateVaultFocusWithKeyboardToolbar(to: passcodeField) {
-                bringElementIntoViewIfNeeded(passcodeField, within: webView)
+                bringElementIntoViewIfNeeded(passcodeField, within: form)
                 focusCreateVaultPasscodeField(passcodeField, keyboard: keyboard, attempt: attempt)
             } else if attempt > 1 {
-                bringElementIntoViewIfNeeded(passcodeField, within: webView)
+                bringElementIntoViewIfNeeded(passcodeField, within: form)
                 focusCreateVaultPasscodeField(passcodeField, keyboard: keyboard, attempt: attempt)
             }
 
@@ -444,12 +446,12 @@ final class KeriWalletUITests: XCTestCase {
             let initialValue = normalizedFieldValue(passcodeField)
             app.typeText(passcode)
 
-            let refreshedNameField = webView.textFields["Name"]
+            let refreshedNameField = form.textFields["Name"]
             guard assertNameField(alias, matches: refreshedNameField, artifactName: "create-vault-name-corrupted-after-passcode") else {
                 return false
             }
 
-            let refreshedPasscodeField = webView.secureTextFields["Passcode"]
+            let refreshedPasscodeField = form.secureTextFields["Passcode"]
             return assertSecureFieldCapturedInput(
                 refreshedPasscodeField,
                 fieldName: "Passcode",
@@ -461,6 +463,15 @@ final class KeriWalletUITests: XCTestCase {
         attachCreateVaultDiagnostics(named: "Passcode-focus-missing")
         XCTFail("Passcode field did not gain a trustworthy focused state after semantic and coordinate taps; refusing to submit Create Vault because runtime evidence would be contaminated.")
         return false
+    }
+
+    private func createVaultFormScope(in webView: XCUIElement) -> XCUIElement {
+        let modalCandidate = webView.otherElements.containing(.staticText, identifier: "Vault Initialization").firstMatch
+        if modalCandidate.exists {
+            return modalCandidate
+        }
+
+        return webView
     }
 
     private func advanceCreateVaultFocusWithKeyboardToolbar(to field: XCUIElement) -> Bool {
