@@ -319,14 +319,11 @@ final class KeriWalletUITests: XCTestCase {
             return nil
         }
 
-        let createVaultButton = webView.buttons["Create Vault"]
-        guard createVaultButton.waitForExistence(timeout: 15) else {
+        guard tapCreateVaultEntry(in: webView) else {
             attachCreateVaultDiagnostics(named: "create-vault-entry-missing")
             XCTFail("Create Vault entry did not appear")
             return nil
         }
-
-        createVaultButton.tap()
 
         let dialogTitle = webView.staticTexts["Vault Initialization"]
         guard dialogTitle.waitForExistence(timeout: 10) else {
@@ -376,6 +373,37 @@ final class KeriWalletUITests: XCTestCase {
         }
 
         return submitButton
+    }
+
+    private func tapCreateVaultEntry(in webView: XCUIElement) -> Bool {
+        let directEntryButtons = [
+            webView.buttons["Create Vault"],
+            webView.buttons["Create Your First Vault"],
+        ]
+
+        for button in directEntryButtons where button.waitForExistence(timeout: 5) {
+            button.tap()
+            return true
+        }
+
+        let drawerToggle = webView.buttons["Vaults"]
+        guard drawerToggle.waitForExistence(timeout: 30) else {
+            return false
+        }
+
+        drawerToggle.tap()
+
+        let drawerCreateButtons = [
+            webView.buttons["Initialize New Vault"],
+            webView.buttons["Create Vault"],
+        ]
+
+        for button in drawerCreateButtons where button.waitForExistence(timeout: 15) {
+            button.tap()
+            return true
+        }
+
+        return false
     }
 
     private func enterCreateVaultAlias(_ alias: String, in webView: XCUIElement) -> Bool {
