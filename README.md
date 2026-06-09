@@ -88,6 +88,12 @@ make sync                       # default: FortWeb convergence path
 make sync-fortweb              # explicit alias for the same FortWeb path
 make payload-contract
 
+# Optional runtime ZIP import for the local FortWeb package flow
+npm run import:fortweb-runtime -- <path-to-fortweb-runtime-zip>
+
+# Then validate the staged payload contract
+npm run test:e2e
+
 # Optional: stage a deterministic FortWeb ref instead of mutable local ../fortweb
 PAYLOAD_SOURCE=fortweb FORTWEB_FETCH=1 FORTWEB_REF=214643f4fa907061334c09c8297c4d1e59f18f45 make payload-contract
 
@@ -203,6 +209,15 @@ The pipeline is split into two scripts:
 4. Validates the staged payload contract before returning.
 
 For deterministic staging, set `FORTWEB_FETCH=1` and `FORTWEB_REF=<commit-or-tag-or-branch>` so the script fetches a temporary FortWeb checkout instead of consuming mutable local `../fortweb` state.
+
+### Local runtime ZIP import lane
+
+The first FortWeb runtime ZIP consumer prototype uses a local ZIP path only.
+
+- Generate a FortWeb runtime ZIP from `libs/fortweb`
+- Import it with `npm run import:fortweb-runtime -- <zip-path>`
+- The importer verifies the ZIP, extracts `fortweb-runtime/`, rebuilds `WebPayload/`, and runs the existing payload validation
+- GitHub artifact download is deferred
 
 > **Rule:** Always run the appropriate sync target after changing payload source files. Never manually edit `WebPayload/`.
 
