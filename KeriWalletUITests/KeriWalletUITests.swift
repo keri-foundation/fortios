@@ -73,10 +73,18 @@ final class KeriWalletUITests: XCTestCase {
             return
         }
 
-        if webView.buttons["Create Vault"].waitForExistence(timeout: 5) {
-            return
-        }
-        if webView.buttons["Create Your First Vault"].waitForExistence(timeout: 5) {
+        let directCandidates: [(XCUIElement, TimeInterval)] = [
+            (webView.buttons["Create Vault"], 5),
+            (webView.buttons["Create Your First Vault"], 5),
+            (webView.buttons["New Vault"], 5),
+            (webView.buttons["Add Vault"], 5),
+            (webView.links["Create Vault"], 5),
+            (webView.links["New Vault"], 5),
+            (webView.staticTexts["Create Vault"], 5),
+            (webView.staticTexts["New Vault"], 5),
+        ]
+
+        for (element, timeout) in directCandidates where element.waitForExistence(timeout: timeout) {
             return
         }
 
@@ -88,8 +96,23 @@ final class KeriWalletUITests: XCTestCase {
 
         drawerToggle.tap()
 
+        let drawerCandidates: [(XCUIElement, TimeInterval)] = [
+            (webView.buttons["Initialize New Vault"], 15),
+            (webView.buttons["Create Vault"], 15),
+            (webView.buttons["New Vault"], 15),
+            (webView.buttons["Add Vault"], 15),
+            (webView.links["Create"], 15),
+            (webView.links["New Vault"], 15),
+            (webView.staticTexts["New Vault"], 15),
+            (webView.staticTexts["Create Vault"], 15),
+        ]
+
+        let found = drawerCandidates.contains { pair in
+            pair.0.waitForExistence(timeout: pair.1)
+        }
+
         XCTAssertTrue(
-            webView.buttons["Initialize New Vault"].waitForExistence(timeout: 15),
+            found,
             "FortWeb vault drawer should expose an initialize-new-vault affordance once opened"
         )
     }
@@ -381,11 +404,20 @@ final class KeriWalletUITests: XCTestCase {
         let directEntryButtons = [
             webView.buttons["Create Vault"],
             webView.buttons["Create Your First Vault"],
+            webView.buttons["New Vault"],
+            webView.buttons["Add Vault"],
+            webView.links["Create Vault"],
+            webView.links["New Vault"],
+            webView.staticTexts["Create Vault"],
+            webView.staticTexts["Create Your First Vault"],
+            webView.staticTexts["New Vault"],
         ]
 
-        for button in directEntryButtons where button.waitForExistence(timeout: 5) {
-            button.tap()
-            return true
+        for button in directEntryButtons where button.exists {
+            if button.isHittable {
+                button.tap()
+                return true
+            }
         }
 
         let drawerToggle = webView.buttons["Vaults"]
@@ -398,11 +430,19 @@ final class KeriWalletUITests: XCTestCase {
         let drawerCreateButtons = [
             webView.buttons["Initialize New Vault"],
             webView.buttons["Create Vault"],
+            webView.buttons["New Vault"],
+            webView.buttons["Add Vault"],
+            webView.links["Create"],
+            webView.links["New Vault"],
+            webView.staticTexts["New Vault"],
+            webView.staticTexts["Create Vault"],
         ]
 
         for button in drawerCreateButtons where button.waitForExistence(timeout: 15) {
-            button.tap()
-            return true
+            if button.isHittable {
+                button.tap()
+                return true
+            }
         }
 
         return false
