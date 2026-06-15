@@ -75,6 +75,7 @@ jobs:
         with:
           repository: keri-foundation/fortweb
           path: .deps/fortweb
+          ref: 7d240be534763f662553e661f6325d222ac8623a
 
       - name: Set up Node
         uses: actions/setup-node@60edb5dd545a775178f52524783378180af0d1f8
@@ -85,14 +86,29 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Build FortWeb runtime package
+        run: |
+          cd .deps/fortweb
+          npm ci
+          npm run build:runtime
+          npm run check:runtime-js
+          npm run package:runtime
+          npm run verify:runtime-package -- .tmp/runtime-packages/fortweb-runtime-*.zip
+          ZIP=$(ls .tmp/runtime-packages/fortweb-runtime-*.zip | head -1)
+          echo "FORTWEB_RUNTIME_ZIP=$PWD/$ZIP" >> "$GITHUB_ENV"
+
+      - name: Import FortWeb runtime into WebPayload
+        run: |
+          node tools/import-fortweb-runtime-package.mjs "$FORTWEB_RUNTIME_ZIP"
+
       - name: Verify bridge contract output
         run: make bridge-check
 
       - name: Run TypeScript checks
         run: npm run typecheck
 
-      - name: Enforce wrapper payload contract
-        run: make payload-contract FORTWEB_FETCH=1
+      - name: Enforce wrapper payload static guards
+        run: make payload-static-guards
 
       - name: Run TypeScript unit tests
         run: make test-ts
@@ -127,6 +143,7 @@ jobs:
         with:
           repository: keri-foundation/fortweb
           path: .deps/fortweb
+          ref: 7d240be534763f662553e661f6325d222ac8623a
 
       - name: Set up Node
         uses: actions/setup-node@60edb5dd545a775178f52524783378180af0d1f8
@@ -137,8 +154,23 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Enforce wrapper payload contract
-        run: make payload-contract FORTWEB_FETCH=1
+      - name: Build FortWeb runtime package
+        run: |
+          cd .deps/fortweb
+          npm ci
+          npm run build:runtime
+          npm run check:runtime-js
+          npm run package:runtime
+          npm run verify:runtime-package -- .tmp/runtime-packages/fortweb-runtime-*.zip
+          ZIP=$(ls .tmp/runtime-packages/fortweb-runtime-*.zip | head -1)
+          echo "FORTWEB_RUNTIME_ZIP=$PWD/$ZIP" >> "$GITHUB_ENV"
+
+      - name: Import FortWeb runtime into WebPayload
+        run: |
+          node tools/import-fortweb-runtime-package.mjs "$FORTWEB_RUNTIME_ZIP"
+
+      - name: Enforce wrapper payload static guards
+        run: make payload-static-guards
 
       - name: Warm simulator services
         run: xcrun simctl list > /dev/null
