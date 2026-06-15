@@ -92,7 +92,7 @@ jobs:
         run: npm run typecheck
 
       - name: Enforce wrapper payload contract
-        run: make payload-contract
+        run: make payload-contract FORTWEB_FETCH=1
 
       - name: Run TypeScript unit tests
         run: make test-ts
@@ -138,7 +138,7 @@ jobs:
         run: npm ci
 
       - name: Enforce wrapper payload contract
-        run: make payload-contract
+        run: make payload-contract FORTWEB_FETCH=1
 
       - name: Warm simulator services
         run: xcrun simctl list > /dev/null
