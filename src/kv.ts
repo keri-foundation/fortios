@@ -24,7 +24,7 @@ import { IDB_DATABASE_NAME, IDB_DEFAULT_STORE } from './constants';
 const STORE_KEY_SEPARATOR = '/';
 const PREFIX_SCAN_SENTINEL = '\uffff';
 
-export interface KVEntry {
+interface KVEntry {
     key: string;
     value: string;
 }
