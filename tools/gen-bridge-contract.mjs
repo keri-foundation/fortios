@@ -45,7 +45,7 @@ function generateTypeScript() {
         '// Regenerate: node tools/gen-bridge-contract.mjs',
         '',
         '// ── Contract version ────────────────────────────────────────────────────────',
-        `export const BRIDGE_CONTRACT_VERSION = ${JSON.stringify(contract.version)} as const;`,
+        `const BRIDGE_CONTRACT_VERSION = ${JSON.stringify(contract.version)} as const;`,
         '',
         '// ── Bridge handler ──────────────────────────────────────────────────────────',
         `export const BRIDGE_HANDLER_NAME = ${JSON.stringify(contract.bridge.handlerName)} as const;`,
@@ -56,9 +56,9 @@ function generateTypeScript() {
     if (contract.lifecycleStates) {
         lines.push('// ── Lifecycle states ────────────────────────────────────────────────────────');
         for (const s of contract.lifecycleStates) {
-            lines.push(`export const LIFECYCLE_${toScreamingSnake(s)} = ${JSON.stringify(s)} as const;`);
+            lines.push(`const LIFECYCLE_${toScreamingSnake(s)} = ${JSON.stringify(s)} as const;`);
         }
-        lines.push('', 'export const LIFECYCLE_STATES = [');
+        lines.push('', 'const LIFECYCLE_STATES = [');
         for (const s of contract.lifecycleStates) {
             lines.push(`    LIFECYCLE_${toScreamingSnake(s)},`);
         }
@@ -68,7 +68,7 @@ function generateTypeScript() {
     lines.push('// ── Bridge message types (JS → Swift) ──────────────────────────────────────');
 
     for (const t of contract.bridgeMessageTypes) {
-        lines.push(`export const BRIDGE_${toScreamingSnake(t)} = ${JSON.stringify(t)} as const;`);
+        lines.push(`const BRIDGE_${toScreamingSnake(t)} = ${JSON.stringify(t)} as const;`);
     }
 
     lines.push('', 'export const BRIDGE_MESSAGE_TYPES = [');
@@ -79,7 +79,7 @@ function generateTypeScript() {
 
     lines.push('// ── Worker command types (main → worker) ────────────────────────────────────');
     for (const t of contract.workerCommandTypes) {
-        lines.push(`export const WORKER_CMD_${toScreamingSnake(t)} = ${JSON.stringify(t)} as const;`);
+        lines.push(`const WORKER_CMD_${toScreamingSnake(t)} = ${JSON.stringify(t)} as const;`);
     }
     lines.push('', 'export const WORKER_COMMAND_TYPES = [');
     for (const t of contract.workerCommandTypes) {
@@ -89,7 +89,7 @@ function generateTypeScript() {
 
     lines.push('// ── Worker result types (worker → main) ─────────────────────────────────────');
     for (const t of contract.workerResultTypes) {
-        lines.push(`export const WORKER_RES_${toScreamingSnake(t)} = ${JSON.stringify(t)} as const;`);
+        lines.push(`const WORKER_RES_${toScreamingSnake(t)} = ${JSON.stringify(t)} as const;`);
     }
     lines.push('', 'export const WORKER_RESULT_TYPES = [');
     for (const t of contract.workerResultTypes) {
