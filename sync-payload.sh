@@ -43,18 +43,20 @@ sync_fortweb_payload() {
     exit 1
   fi
 
+  if [[ ! -d "${FORTWEB_DIR}/dist/runtime" ]]; then
+    echo "error: FortWeb dist/runtime not found at ${FORTWEB_DIR}/dist/runtime" 1>&2
+    echo "       Run in FortWeb: npm run build:runtime" 1>&2
+    exit 1
+  fi
+
+  if [[ ! -f "${FORTWEB_DIR}/dist/runtime/app/app/main.js" ]]; then
+    echo "error: FortWeb compiled entry script missing at ${FORTWEB_DIR}/dist/runtime/app/app/main.js" 1>&2
+    echo "       Run in FortWeb: npm run build:runtime" 1>&2
+    exit 1
+  fi
+
   if [[ ! -f "${FORTWEB_DIR}/app/index.html" ]]; then
     echo "error: FortWeb app/index.html missing at ${FORTWEB_DIR}/app/index.html" 1>&2
-    exit 1
-  fi
-
-  if [[ ! -f "${FORTWEB_DIR}/pyscript-ci.toml" ]]; then
-    echo "error: FortWeb pyscript-ci.toml missing at ${FORTWEB_DIR}/pyscript-ci.toml" 1>&2
-    exit 1
-  fi
-
-  if [[ ! -d "${FORTWEB_DIR}/vendor" ]]; then
-    echo "error: FortWeb vendor directory missing at ${FORTWEB_DIR}/vendor" 1>&2
     exit 1
   fi
 
@@ -63,14 +65,17 @@ sync_fortweb_payload() {
     exit 1
   fi
 
-  echo "[sync-payload] syncing FortWeb payload into wrapper WebPayload/"
+  echo "[sync-payload] syncing compiled FortWeb payload into wrapper WebPayload/"
   mkdir -p "${WRAPPER_PAYLOAD_DIR}"
   rm -rf "${WRAPPER_PAYLOAD_DIR}"/*
-  mkdir -p "${WRAPPER_PAYLOAD_DIR}/fortweb"
-  cp -R "${FORTWEB_DIR}/app" "${WRAPPER_PAYLOAD_DIR}/fortweb/app"
-  cp -R "${FORTWEB_DIR}/vendor" "${WRAPPER_PAYLOAD_DIR}/fortweb/vendor"
+  mkdir -p "${WRAPPER_PAYLOAD_DIR}/fortweb/app"
+
+  # Copy compiled dist/runtime (includes app/, vendor/, pyscript-ci.toml)
+  cp -R "${FORTWEB_DIR}/dist/runtime/"* "${WRAPPER_PAYLOAD_DIR}/fortweb/"
+  # Entry HTML is not compiled by tsc — copy from source
+  cp "${FORTWEB_DIR}/app/index.html" "${WRAPPER_PAYLOAD_DIR}/fortweb/app/index.html"
+  # Wheels are not in dist/runtime — copy from source
   cp -R "${FORTWEB_DIR}/wheels" "${WRAPPER_PAYLOAD_DIR}/fortweb/wheels"
-  cp "${FORTWEB_DIR}/pyscript-ci.toml" "${WRAPPER_PAYLOAD_DIR}/fortweb/pyscript-ci.toml"
   write_fortweb_redirect
   write_fortweb_manifest
 }
