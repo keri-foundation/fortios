@@ -41,8 +41,25 @@ The browser validation harness is non-shipped. The app bundle must stage and ser
 |------|---------|---------|
 | **mise** | latest | `curl https://mise.run \| sh` |
 | **Node** | 22.12.0 | managed automatically by mise via `.tool-versions` |
-| **Xcode** | 16.x | Mac App Store |
 | **SwiftLint** | latest | `brew install swiftlint` |
+
+### Xcode version policy
+
+Fort-ios is currently validated with **Xcode 26.4.1**.
+
+The deployment target remains **iOS 16.4** and is independent of the installed
+simulator runtime. Older Xcode compatibility has not been revalidated against
+the current project format.
+
+| Attribute | Value |
+|-----------|-------|
+| Minimum supported Xcode | Not verified — last validated with 26.4.1 |
+| Currently verified Xcode | 26.4.1 |
+| Currently verified iOS SDK | 26.4 |
+| Deployment target | 16.4 |
+| Currently verified simulator runtime | 26.4.1 |
+| Swift language mode | 5 |
+| Project object version | 77 |
 
 > mise manages the Node version — you do not need to install Node manually.
 
@@ -80,29 +97,69 @@ After these three steps the project is ready to build.
 
 ## 3. Daily workflow
 
+### Quick start — prepare for Xcode
+
 ```sh
-# 1. Confirm Xcode, Simulator, and payload-source readiness
+# One command to prepare the repo for opening in Xcode:
+make xcode-ready FORTWEB_DIR=../FortWeb
+
+# Then open Xcode and press Play.
+make open
+```
+
+This resolves a simulator, stages the payload, validates the payload contract,
+checks the bridge contract, and runs TypeScript type-checking and unit tests.
+Use `make xcode-ready XCODE_READY_TESTS=0` to skip unit tests.
+
+### Simulator selection
+
+The Makefile auto-resolves a single iPhone simulator:
+
+```
+# Auto-detect (single booted → newest runtime → preferred model):
+make build
+
+# Override by name:
+make build SIMULATOR_NAME="iPhone 16"
+
+# Override by name + OS version:
+make build SIMULATOR_NAME="iPhone 17 Pro" SIMULATOR_OS=26.4.1
+
+# Override by UDID:
+make build SIMULATOR_UDID="11111111-1111-1111-1111-111111111111"
+
+# See what was resolved:
+make ios-resolve-sim
+```
+
+### Full workflow
+
+```sh
+# 1. Confirm repo readiness
 make ios-doctor
 
-# 2. Stage the shipped wrapper payload and verify the payload contract
+# 2. Simulator info
+make ios-resolve-sim
+
+# 3. Stage the shipped wrapper payload and verify the payload contract
 make sync                       # default: FortWeb convergence path
 make sync-fortweb              # explicit alias for the same FortWeb path
 make payload-contract
 
-# 3. Run the fast local checks
+# 4. Run the fast local checks
 make lint                      # SwiftLint (Swift sources)
 make lint-ts                   # tsc --noEmit (TypeScript)
 make test-ts                   # Vitest unit tests
 
-# 4. Build and launch on Simulator
+# 5. Build and launch on Simulator
 make dev-sim
 make run-sim
 
-# 5. Build and launch on physical device
+# 6. Build and launch on physical device
 make dev-device
 make run-device DEVICE_REF=<udid-or-name>
 
-# 6. Optional wrapper/device parity checks
+# 7. Optional wrapper/device parity checks
 make parity-smoke DEVICE_REF=<udid-or-name>
 make logs-sim
 make logs-device DEVICE_REF=<udid-or-name>
@@ -124,11 +181,13 @@ Run `make help` at any time to list all available targets.
 | `make sync` | Stage the FortWeb product-shell payload into `WebPayload/` |
 | `make sync-fortweb` | Explicit alias for the FortWeb wrapper staging path |
 | `make payload-contract` | Scan active sources for blocked legacy payload posture and validate the staged `WebPayload/` manifest |
+| `make xcode-ready` | Prepare repo for Xcode: resolve simulator, sync payload, validate, typecheck, test (use `XCODE_READY_TESTS=0` to skip tests) |
 | `make ios-list-sims` | List available iOS Simulator destinations |
 | `make ios-list-devices` | List CoreDevice-visible physical devices |
+| `make ios-resolve-sim` | Print resolved simulator info (override with `SIMULATOR_NAME`, `SIMULATOR_OS`, or `SIMULATOR_UDID`) |
 | `make ios-doctor` | Verify Xcode, simulator, and payload-source readiness |
 | `make dev-sim` | Sync payload, run TS checks, and build for Simulator |
-| `make run-sim` | Boot, install, and launch on the configured Simulator |
+| `make run-sim` | Boot, install, and launch on the resolved Simulator |
 | `make dev-device` | Sync payload and build for a generic iOS device output |
 | `make run-device DEVICE_REF=<udid-or-name>` | Install and launch on a physical device |
 | `make parity-smoke DEVICE_REF=<udid-or-name>` | Run the shared payload sequentially on simulator and device |

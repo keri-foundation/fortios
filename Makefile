@@ -5,8 +5,23 @@ SCHEME        := KeriWallet
 APP_BUNDLE_ID := com.kerifoundation.wallet
 PAYLOAD_SOURCE ?= fortweb
 FORTWEB_DIR   ?= ../fortweb
-SIMULATOR_NAME ?= iPhone 17 Pro
-SIMULATOR     := platform=iOS Simulator,name=$(SIMULATOR_NAME)
+
+# ── Simulator resolution ─────────────────────────────────────────────────────
+# Resolve a single simulator UDID.  Precedence:
+#   SIMULATOR_UDID           → use that exact device
+#   SIMULATOR_NAME ± SIMULATOR_OS → match by name, optionally constrained by OS
+#   single booted iPhone     → auto-select
+#   newest runtime           → preferred model fallback
+SIMULATOR_UDID  ?=
+SIMULATOR_NAME ?=
+SIMULATOR_OS   ?=
+SIM_UDID       := $(shell \
+	export SIMULATOR_UDID="$(SIMULATOR_UDID)" \
+	       SIMULATOR_NAME="$(SIMULATOR_NAME)" \
+	       SIMULATOR_OS="$(SIMULATOR_OS)" && \
+	python3 scripts/resolve-ios-simulator.py --udid 2>/dev/null || echo "SIM_UNRESOLVED")
+SIM_DESTINATION := platform=iOS Simulator,id=$(SIM_UDID)
+
 SIM_DERIVED_DATA := build/DerivedData-sim
 DEVICE_DERIVED_DATA := build/DerivedData-device
 TEST_RESULTS  := build/TestResults.xcresult
@@ -17,7 +32,10 @@ SIM_APP_PATH  := $(SIM_DERIVED_DATA)/Build/Products/Debug-iphonesimulator/KeriWa
 DEVICE_APP_PATH := $(DEVICE_DERIVED_DATA)/Build/Products/Debug-iphoneos/KeriWallet.app
 DEVICE_REF    ?=
 
-.PHONY: help setup pyodide sync sync-fortweb payload-contract ios-doctor ios-list-sims ios-list-devices dev-sim run-sim dev-device run-device parity-smoke logs-sim logs-device build test-swift test-ts test-e2e test-e2e-slow test-all bridge-check lint lint-ts open clean archive export upload
+# FortWeb-driven Xcode preparation
+XCODE_READY_TESTS ?= 1
+
+.PHONY: help setup pyodide sync sync-fortweb payload-contract ios-doctor ios-resolve-sim ios-list-sims ios-list-devices xcode-ready dev-sim run-sim dev-device run-device parity-smoke logs-sim logs-device build test-swift test-ts test-e2e test-e2e-slow test-all bridge-check lint lint-ts open clean archive export upload
 
 help: ## Show available make targets
 	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | \
@@ -67,27 +85,87 @@ ios-list-sims: ## List available iOS Simulator destinations
 ios-list-devices: ## List CoreDevice-visible physical devices
 	xcrun devicectl list devices
 
+ios-resolve-sim: ## Print resolved simulator information
+	@SIMULATOR_UDID="$(SIMULATOR_UDID)" SIMULATOR_NAME="$(SIMULATOR_NAME)" SIMULATOR_OS="$(SIMULATOR_OS)" \
+	  python3 scripts/resolve-ios-simulator.py
+
 ios-doctor: ## Verify Xcode, simulator, and payload-source readiness
 	@command -v xcodebuild >/dev/null || (echo "ERROR: xcodebuild not found" && exit 1)
 	@command -v xcrun >/dev/null || (echo "ERROR: xcrun not found" && exit 1)
-	@echo "payload-source=$(PAYLOAD_SOURCE)"
-	@if [ "$(PAYLOAD_SOURCE)" = "fortweb" ]; then \
-		[ -d "$(FORTWEB_DIR)" ] || (echo "ERROR: FortWeb repo not found at $(FORTWEB_DIR)" && exit 1); \
-		[ -f "$(FORTWEB_DIR)/app/index.html" ] || (echo "ERROR: FortWeb app/index.html missing" && exit 1); \
-		[ -f "$(FORTWEB_DIR)/pyscript-ci.toml" ] || (echo "ERROR: FortWeb pyscript-ci.toml missing" && exit 1); \
+	@echo "developer-dir=$${DEVELOPER_DIR:-not set}"
+	@xcodebuild -version 2>/dev/null | sed 's/^/xcode-/'
+	@echo "ios-sdk-version=$$(xcrun --sdk iphonesimulator --show-sdk-version 2>/dev/null || echo unknown)"
+	@echo "deployment-target=$$(xcodebuild -project $(XCODE_PROJECT) -showBuildSettings 2>/dev/null | awk '/IPHONEOS_DEPLOYMENT_TARGET/ {print $$3}' | head -1)"
+	@echo "swift-version=$$(xcrun swift --version 2>/dev/null | head -1 || echo unknown)"
+	@echo "fortweb-dir=$(FORTWEB_DIR)"
+	@echo "payload-present=$$([ -d WebPayload/fortweb ] && echo yes || echo no)"
+	@echo "payload-valid=$$([ -f WebPayload/build-manifest.json ] && echo yes || echo no)"
+	@if [ -f WebPayload/build-manifest.json ]; then \
+	  python3 -c "import json; m=json.load(open('WebPayload/build-manifest.json')); print('payload-producer='+m.get('producer','unknown')); print('payload-git-sha='+m.get('git_sha',m.get('dist_tree_sha256','unknown'))[:16])" 2>/dev/null || true; \
 	fi
-	@xcrun simctl list devices available | grep -q "$(SIMULATOR_NAME)" || (echo "ERROR: Simulator '$(SIMULATOR_NAME)' not available" && exit 1)
-	@echo "simulator=$(SIMULATOR_NAME)"
-	@xcrun devicectl list devices >/dev/null 2>&1 || echo "warning: no physical device available via CoreDevice"
+	@if [ "$$(SIMULATOR_UDID)" != "" ] || [ "$$(SIMULATOR_NAME)" != "" ] || [ "$$(SIMULATOR_OS)" != "" ]; then \
+	  echo "INFO: Using explicit simulator override"; \
+	  SIMULATOR_UDID="$(SIMULATOR_UDID)" SIMULATOR_NAME="$(SIMULATOR_NAME)" SIMULATOR_OS="$(SIMULATOR_OS)" \
+	    python3 scripts/resolve-ios-simulator.py; \
+	else \
+	  echo "INFO: Auto-resolving simulator (set SIMULATOR_NAME, SIMULATOR_OS, or SIMULATOR_UDID to override)"; \
+	  SIMULATOR_UDID="$(SIMULATOR_UDID)" SIMULATOR_NAME="$(SIMULATOR_NAME)" SIMULATOR_OS="$(SIMULATOR_OS)" \
+	    python3 scripts/resolve-ios-simulator.py; \
+	fi
+	@xcrun devicectl list devices >/dev/null 2>&1 || echo "WARNING: no physical device available via CoreDevice"
+	@if [ ! -d WebPayload/fortweb ]; then \
+	  echo "ERROR: WebPayload is missing."; \
+	  echo "Run: make xcode-ready FORTWEB_DIR=../FortWeb"; \
+	fi
+
+xcode-ready: ## Prepare the repository for opening in Xcode (press Play after)
+	@command -v xcodebuild >/dev/null || (echo "ERROR: xcodebuild not found. Install Xcode." && exit 1)
+	@command -v npm >/dev/null || (echo "ERROR: npm not found." && exit 1)
+	@if [ ! -d node_modules ]; then echo "ERROR: node_modules is missing."; echo "Run: npm ci"; exit 1; fi
+	@echo "=== Resolving simulator ==="
+	@SIMULATOR_UDID="$(SIMULATOR_UDID)" SIMULATOR_NAME="$(SIMULATOR_NAME)" SIMULATOR_OS="$(SIMULATOR_OS)" \
+	  python3 scripts/resolve-ios-simulator.py || (echo "ERROR: No compatible iPhone Simulator is installed."; echo "Open Xcode > Settings > Components and install an iOS Simulator runtime."; exit 1)
+	@echo ""
+	@echo "=== Syncing payload ==="
+	@if [ -d WebPayload/fortweb ]; then \
+	  echo "Payload already staged. Use FORTWEB_DIR to re-sync if needed."; \
+	else \
+	  PAYLOAD_SOURCE=$(PAYLOAD_SOURCE) FORTWEB_DIR=$(FORTWEB_DIR) ./sync-payload.sh; \
+	fi
+	@echo ""
+	@echo "=== Validating payload ==="
+	@node tools/validate-mobile-payload.mjs --payload-dir WebPayload --target ios-webpayload
+	@echo ""
+	@echo "=== Checking bridge contract ==="
+	@npm run bridge:check
+	@echo ""
+	@echo "=== TypeScript type checking ==="
+	@npm run typecheck
+	@if [ "$(XCODE_READY_TESTS)" = "1" ]; then \
+	  echo ""; \
+	  echo "=== Running TypeScript unit tests ==="; \
+	  npm run test; \
+	fi
+	@echo ""
+	@echo "=== Ready ==="
+	@echo "Project: $(XCODE_PROJECT)"
+	@echo "Open with: make open"
+	@SIMULATOR_UDID="$(SIMULATOR_UDID)" SIMULATOR_NAME="$(SIMULATOR_NAME)" SIMULATOR_OS="$(SIMULATOR_OS)" \
+	  python3 scripts/resolve-ios-simulator.py 2>/dev/null || true
 
 dev-sim: sync lint-ts test-ts build ## Sync payload, run TS checks, and build for Simulator
 
-run-sim: ## Boot, install, and launch on the configured Simulator
+run-sim: ## Boot, install, and launch on the resolved Simulator
+	@if [ "$(SIM_UDID)" = "SIM_UNRESOLVED" ]; then \
+	  echo "ERROR: Could not resolve a simulator."; \
+	  echo "Run: make ios-resolve-sim"; \
+	  exit 1; \
+	fi
 	open -a Simulator || true
-	xcrun simctl boot "$(SIMULATOR_NAME)" || true
-	xcrun simctl bootstatus "$(SIMULATOR_NAME)" -b
-	xcrun simctl install booted "$(SIM_APP_PATH)"
-	xcrun simctl launch booted $(APP_BUNDLE_ID)
+	xcrun simctl boot "$(SIM_UDID)" || true
+	xcrun simctl bootstatus "$(SIM_UDID)" -b
+	xcrun simctl install "$(SIM_UDID)" "$(SIM_APP_PATH)"
+	xcrun simctl launch "$(SIM_UDID)" $(APP_BUNDLE_ID)
 
 dev-device: sync ## Sync payload and build for a generic iOS device output
 	xcodebuild build \
@@ -112,14 +190,21 @@ parity-smoke: ## Run the shared payload through simulator then device (requires 
 		echo "Run: make ios-list-devices"; \
 		exit 1; \
 	fi
-	xcrun simctl shutdown all || true
+	@if [ "$(SIM_UDID)" = "SIM_UNRESOLVED" ]; then \
+	  echo "ERROR: Could not resolve a simulator."; \
+	  exit 1; \
+	fi
 	$(MAKE) dev-sim PAYLOAD_SOURCE=$(PAYLOAD_SOURCE) FORTWEB_DIR=$(FORTWEB_DIR)
 	$(MAKE) run-sim PAYLOAD_SOURCE=$(PAYLOAD_SOURCE) FORTWEB_DIR=$(FORTWEB_DIR)
 	$(MAKE) dev-device PAYLOAD_SOURCE=$(PAYLOAD_SOURCE) FORTWEB_DIR=$(FORTWEB_DIR)
 	$(MAKE) run-device PAYLOAD_SOURCE=$(PAYLOAD_SOURCE) FORTWEB_DIR=$(FORTWEB_DIR) DEVICE_REF="$(DEVICE_REF)"
 
 logs-sim: ## Show recent simulator logs for KeriWallet
-	xcrun simctl spawn booted log show --style compact --last 10m --predicate 'subsystem == "com.kerifoundation.wallet" AND (category == "WebBridge" OR category == "WebContainer" OR category == "SchemeHandler" OR category == "WebNav")' | tail -n 200
+	@if [ "$(SIM_UDID)" = "SIM_UNRESOLVED" ]; then \
+	  echo "ERROR: Could not resolve a simulator."; \
+	  exit 1; \
+	fi
+	xcrun simctl spawn "$(SIM_UDID)" log show --style compact --last 10m --predicate 'subsystem == "com.kerifoundation.wallet" AND (category == "WebBridge" OR category == "WebContainer" OR category == "SchemeHandler" OR category == "WebNav")' | tail -n 200
 
 logs-device: ## Relaunch on device with console attached (use DEVICE_REF=<udid-or-name>)
 	@if [ -z "$(DEVICE_REF)" ]; then \
@@ -130,19 +215,27 @@ logs-device: ## Relaunch on device with console attached (use DEVICE_REF=<udid-o
 	xcrun devicectl device process launch --device "$(DEVICE_REF)" --terminate-existing --console $(APP_BUNDLE_ID)
 
 build: ## Build KeriWallet for iOS Simulator (Debug)
+	@if [ "$(SIM_UDID)" = "SIM_UNRESOLVED" ]; then \
+	  echo "ERROR: Could not resolve a simulator."; \
+	  exit 1; \
+	fi
 	xcodebuild build \
 	  -project $(XCODE_PROJECT) \
 	  -scheme $(SCHEME) \
 	  -configuration Debug \
-	  -destination '$(SIMULATOR)' \
+	  -destination '$(SIM_DESTINATION)' \
 	  -derivedDataPath $(SIM_DERIVED_DATA)
 
 test-swift: ## Run Swift unit + UI tests on iOS Simulator
+	@if [ "$(SIM_UDID)" = "SIM_UNRESOLVED" ]; then \
+	  echo "ERROR: Could not resolve a simulator."; \
+	  exit 1; \
+	fi
 	xcodebuild test \
 	  -project $(XCODE_PROJECT) \
 	  -scheme $(SCHEME) \
 	  -configuration Debug \
-	  -destination '$(SIMULATOR)' \
+	  -destination '$(SIM_DESTINATION)' \
 	  -resultBundlePath $(TEST_RESULTS) \
 	  -derivedDataPath $(SIM_DERIVED_DATA) \
 	  -parallel-testing-enabled NO
