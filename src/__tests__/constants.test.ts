@@ -17,23 +17,6 @@ import {
 import {
     BRIDGE_HANDLER_NAME,
     BRIDGE_MESSAGE_TYPES,
-    WORKER_CMD_INIT,
-    WORKER_CMD_BLAKE3_HASH,
-    WORKER_CMD_DB_DEL,
-    WORKER_CMD_DB_GET,
-    WORKER_CMD_DB_LIST,
-    WORKER_CMD_DB_PUT,
-    WORKER_CMD_SIGN,
-    WORKER_CMD_VERIFY,
-    WORKER_RES_READY,
-    WORKER_RES_BLAKE3_RESULT,
-    WORKER_RES_DB_DEL_RESULT,
-    WORKER_RES_DB_GET_RESULT,
-    WORKER_RES_DB_LIST_RESULT,
-    WORKER_RES_DB_PUT_RESULT,
-    WORKER_RES_SIGN_RESULT,
-    WORKER_RES_VERIFY_RESULT,
-    WORKER_RES_ERROR,
     WORKER_COMMAND_TYPES,
     WORKER_RESULT_TYPES,
 } from '../bridge-contract';
@@ -99,26 +82,26 @@ describe('bridge-contract constants', () => {
     });
 
     it('worker commands include init, crypto verbs, and storage verbs', () => {
-        expect(WORKER_COMMAND_TYPES).toContain(WORKER_CMD_INIT);
-        expect(WORKER_COMMAND_TYPES).toContain(WORKER_CMD_BLAKE3_HASH);
-        expect(WORKER_COMMAND_TYPES).toContain(WORKER_CMD_SIGN);
-        expect(WORKER_COMMAND_TYPES).toContain(WORKER_CMD_VERIFY);
-        expect(WORKER_COMMAND_TYPES).toContain(WORKER_CMD_DB_PUT);
-        expect(WORKER_COMMAND_TYPES).toContain(WORKER_CMD_DB_GET);
-        expect(WORKER_COMMAND_TYPES).toContain(WORKER_CMD_DB_DEL);
-        expect(WORKER_COMMAND_TYPES).toContain(WORKER_CMD_DB_LIST);
+        expect(WORKER_COMMAND_TYPES).toContain('init');
+        expect(WORKER_COMMAND_TYPES).toContain('blake3_hash');
+        expect(WORKER_COMMAND_TYPES).toContain('sign');
+        expect(WORKER_COMMAND_TYPES).toContain('verify');
+        expect(WORKER_COMMAND_TYPES).toContain('db_put');
+        expect(WORKER_COMMAND_TYPES).toContain('db_get');
+        expect(WORKER_COMMAND_TYPES).toContain('db_del');
+        expect(WORKER_COMMAND_TYPES).toContain('db_list');
     });
 
     it('worker results include ready, crypto results, storage results, and error', () => {
-        expect(WORKER_RESULT_TYPES).toContain(WORKER_RES_READY);
-        expect(WORKER_RESULT_TYPES).toContain(WORKER_RES_BLAKE3_RESULT);
-        expect(WORKER_RESULT_TYPES).toContain(WORKER_RES_SIGN_RESULT);
-        expect(WORKER_RESULT_TYPES).toContain(WORKER_RES_VERIFY_RESULT);
-        expect(WORKER_RESULT_TYPES).toContain(WORKER_RES_DB_PUT_RESULT);
-        expect(WORKER_RESULT_TYPES).toContain(WORKER_RES_DB_GET_RESULT);
-        expect(WORKER_RESULT_TYPES).toContain(WORKER_RES_DB_DEL_RESULT);
-        expect(WORKER_RESULT_TYPES).toContain(WORKER_RES_DB_LIST_RESULT);
-        expect(WORKER_RESULT_TYPES).toContain(WORKER_RES_ERROR);
+        expect(WORKER_RESULT_TYPES).toContain('ready');
+        expect(WORKER_RESULT_TYPES).toContain('blake3_result');
+        expect(WORKER_RESULT_TYPES).toContain('sign_result');
+        expect(WORKER_RESULT_TYPES).toContain('verify_result');
+        expect(WORKER_RESULT_TYPES).toContain('db_put_result');
+        expect(WORKER_RESULT_TYPES).toContain('db_get_result');
+        expect(WORKER_RESULT_TYPES).toContain('db_del_result');
+        expect(WORKER_RESULT_TYPES).toContain('db_list_result');
+        expect(WORKER_RESULT_TYPES).toContain('error');
     });
 
     it('BRIDGE_MESSAGE_TYPES contains all bridge message type constants', () => {

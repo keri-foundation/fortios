@@ -3,19 +3,19 @@
 // Regenerate: node tools/gen-bridge-contract.mjs
 
 // ── Contract version ────────────────────────────────────────────────────────
-export const BRIDGE_CONTRACT_VERSION = "1.0" as const;
+const BRIDGE_CONTRACT_VERSION = "1.0" as const;
 
 // ── Bridge handler ──────────────────────────────────────────────────────────
 export const BRIDGE_HANDLER_NAME = "bridge" as const;
 
 // ── Lifecycle states ────────────────────────────────────────────────────────
-export const LIFECYCLE_BOOT = "boot" as const;
-export const LIFECYCLE_RUNTIME_STARTING = "runtime_starting" as const;
-export const LIFECYCLE_CRYPTO_READY = "crypto_ready" as const;
-export const LIFECYCLE_READY = "ready" as const;
-export const LIFECYCLE_ERROR = "error" as const;
+const LIFECYCLE_BOOT = "boot" as const;
+const LIFECYCLE_RUNTIME_STARTING = "runtime_starting" as const;
+const LIFECYCLE_CRYPTO_READY = "crypto_ready" as const;
+const LIFECYCLE_READY = "ready" as const;
+const LIFECYCLE_ERROR = "error" as const;
 
-export const LIFECYCLE_STATES = [
+const LIFECYCLE_STATES = [
     LIFECYCLE_BOOT,
     LIFECYCLE_RUNTIME_STARTING,
     LIFECYCLE_CRYPTO_READY,
@@ -24,11 +24,11 @@ export const LIFECYCLE_STATES = [
 ] as const;
 
 // ── Bridge message types (JS → Swift) ──────────────────────────────────────
-export const BRIDGE_JS_ERROR = "js_error" as const;
-export const BRIDGE_UNHANDLED_REJECTION = "unhandled_rejection" as const;
-export const BRIDGE_LOG = "log" as const;
-export const BRIDGE_LIFECYCLE = "lifecycle" as const;
-export const BRIDGE_CRYPTO_RESULT = "crypto_result" as const;
+const BRIDGE_JS_ERROR = "js_error" as const;
+const BRIDGE_UNHANDLED_REJECTION = "unhandled_rejection" as const;
+const BRIDGE_LOG = "log" as const;
+const BRIDGE_LIFECYCLE = "lifecycle" as const;
+const BRIDGE_CRYPTO_RESULT = "crypto_result" as const;
 
 export const BRIDGE_MESSAGE_TYPES = [
     BRIDGE_JS_ERROR,
@@ -39,14 +39,14 @@ export const BRIDGE_MESSAGE_TYPES = [
 ] as const;
 
 // ── Worker command types (main → worker) ────────────────────────────────────
-export const WORKER_CMD_INIT = "init" as const;
-export const WORKER_CMD_BLAKE3_HASH = "blake3_hash" as const;
-export const WORKER_CMD_SIGN = "sign" as const;
-export const WORKER_CMD_VERIFY = "verify" as const;
-export const WORKER_CMD_DB_PUT = "db_put" as const;
-export const WORKER_CMD_DB_GET = "db_get" as const;
-export const WORKER_CMD_DB_DEL = "db_del" as const;
-export const WORKER_CMD_DB_LIST = "db_list" as const;
+const WORKER_CMD_INIT = "init" as const;
+const WORKER_CMD_BLAKE3_HASH = "blake3_hash" as const;
+const WORKER_CMD_SIGN = "sign" as const;
+const WORKER_CMD_VERIFY = "verify" as const;
+const WORKER_CMD_DB_PUT = "db_put" as const;
+const WORKER_CMD_DB_GET = "db_get" as const;
+const WORKER_CMD_DB_DEL = "db_del" as const;
+const WORKER_CMD_DB_LIST = "db_list" as const;
 
 export const WORKER_COMMAND_TYPES = [
     WORKER_CMD_INIT,
@@ -60,16 +60,16 @@ export const WORKER_COMMAND_TYPES = [
 ] as const;
 
 // ── Worker result types (worker → main) ─────────────────────────────────────
-export const WORKER_RES_READY = "ready" as const;
-export const WORKER_RES_BLAKE3_RESULT = "blake3_result" as const;
-export const WORKER_RES_SIGN_RESULT = "sign_result" as const;
-export const WORKER_RES_VERIFY_RESULT = "verify_result" as const;
-export const WORKER_RES_DB_PUT_RESULT = "db_put_result" as const;
-export const WORKER_RES_DB_GET_RESULT = "db_get_result" as const;
-export const WORKER_RES_DB_DEL_RESULT = "db_del_result" as const;
-export const WORKER_RES_DB_LIST_RESULT = "db_list_result" as const;
-export const WORKER_RES_ERROR = "error" as const;
-export const WORKER_RES_LOG = "log" as const;
+const WORKER_RES_READY = "ready" as const;
+const WORKER_RES_BLAKE3_RESULT = "blake3_result" as const;
+const WORKER_RES_SIGN_RESULT = "sign_result" as const;
+const WORKER_RES_VERIFY_RESULT = "verify_result" as const;
+const WORKER_RES_DB_PUT_RESULT = "db_put_result" as const;
+const WORKER_RES_DB_GET_RESULT = "db_get_result" as const;
+const WORKER_RES_DB_DEL_RESULT = "db_del_result" as const;
+const WORKER_RES_DB_LIST_RESULT = "db_list_result" as const;
+const WORKER_RES_ERROR = "error" as const;
+const WORKER_RES_LOG = "log" as const;
 
 export const WORKER_RESULT_TYPES = [
     WORKER_RES_READY,
