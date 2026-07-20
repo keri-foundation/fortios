@@ -1,0 +1,14 @@
+{
+  "entry": [
+    "src/main.ts",
+    "src/pyodide_worker.ts"
+  ],
+  "project": ["src/**/*.ts", "tools/**/*.mjs", "playwright/**/*.ts"],
+  "ignore": [
+    "WebPayload/**",
+    "public/pyodide/pyodide.asm.js",
+    "public/pyodide/pyodide.js",
+    "public/pyodide/pyodide.mjs"
+  ],
+  "ignoreDependencies": []
+}

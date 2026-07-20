@@ -35,7 +35,7 @@ DEVICE_REF    ?=
 # FortWeb-driven Xcode preparation
 XCODE_READY_TESTS ?= 1
 
-.PHONY: help setup pyodide sync sync-fortweb payload-contract ios-doctor ios-resolve-sim ios-list-sims ios-list-devices xcode-ready dev-sim run-sim dev-device run-device parity-smoke logs-sim logs-device build test-swift test-ts test-e2e test-e2e-slow test-all bridge-check lint lint-ts open clean clean-payload clean-runtime clean-all doctor archive export upload
+.PHONY: help setup pyodide sync sync-fortweb payload-contract ios-doctor ios-resolve-sim ios-list-sims ios-list-devices xcode-ready dev-sim run-sim dev-device run-device parity-smoke logs-sim logs-device build test-swift test-ts test-e2e test-e2e-slow test-all bridge-check lint lint-ts open clean clean-payload clean-runtime clean-all doctor generated-check knip archive export upload
 
 help: ## Show available make targets
 	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | \
@@ -247,6 +247,15 @@ open: ## Open KeriWallet.xcodeproj in Xcode
 
 lint: ## Run SwiftLint on all Swift sources (--strict)
 	cd $(CURDIR) && swiftlint lint --config .swiftlint.yml --strict
+
+generated-check: ## Verify generated bridge contracts are current and deterministic
+	npm run bridge:check
+	@test -f src/bridge-contract.ts || (echo "ERROR: src/bridge-contract.ts missing" && exit 1)
+	@test -f KeriWallet/BridgeContract.swift || (echo "ERROR: BridgeContract.swift missing" && exit 1)
+	@test -f generated/BridgeContract.kt || (echo "ERROR: BridgeContract.kt missing" && exit 1)
+
+knip: ## Run Knip unused-code analysis
+	npm run knip
 
 # ── Cleanup targets ───────────────────────────────────────────────────────────
 
