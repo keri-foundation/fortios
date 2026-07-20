@@ -1,5 +1,5 @@
 {
-  "$schema": "https://raw.githubusercontent.com/keri-foundation/Fort-ios/main/scripts/pyodide-assets-lock.schema.json",
+  "_schema_note": "Local JSON Schema validation deferred — no schema file yet committed.",
   "version": 1,
   "pyodide": {
     "version": "0.29.3",
