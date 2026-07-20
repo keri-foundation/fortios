@@ -18,6 +18,30 @@ final class WebContainerViewController: UIViewController {
         userContentController.add(bridge, name: AppConfig.Bridge.handlerName)
         self.bridge = bridge
 
+        // Inject runtime-origin contract before any document loads.
+        // This must run at document start so main.js can read it during bootstrap.
+        if let contractPath = Bundle.main.path(
+            forResource: "runtime-origin-contract",
+            ofType: "json",
+            inDirectory: "WebPayload/fortweb/app"
+        ),
+           let contractData = try? Data(contentsOf: URL(fileURLWithPath: contractPath)),
+           let contractString = String(data: contractData, encoding: .utf8) {
+            let scriptSource = """
+                window.__FORT_RUNTIME_ORIGIN__ = \(contractString);
+                """
+            let script = WKUserScript(
+                source: scriptSource,
+                injectionTime: .atDocumentStart,
+                forMainFrameOnly: true
+            )
+            userContentController.addUserScript(script)
+        } else {
+            AppLogger.warning(
+                "[WebContainer] runtime-origin-contract.json not found in bundle",
+                category: AppConfig.Log.webContainer)
+        }
+
         // Receive crypto operation results from Pyodide worker via JS bridge
         bridge.onCryptoResult = { [weak self] payload in
             _ = self  // suppress unused warning; callers can extend this
