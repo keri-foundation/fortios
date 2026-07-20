@@ -213,6 +213,7 @@ async function validateWrapperLayout(payloadDir, target) {
         });
     }
 
+    // ── Entry document existence ──────────────────────────────────────
     try {
         await readFile(path.join(payloadDir, IOS_WRAPPER_CONTRACT.entryDocument), 'utf8');
     } catch {
@@ -222,6 +223,109 @@ async function validateWrapperLayout(payloadDir, target) {
             reason: 'staged wrapper payload is missing the FortWeb entry document',
             expected: IOS_WRAPPER_CONTRACT.expectedPosture,
         });
+    }
+
+    // ── Entry script existence (must resolve inside payload root) ─────
+    violations.push(...(await checkFileExistsWithinPayload(
+        payloadDir,
+        IOS_WRAPPER_CONTRACT.entryScript,
+        'declared entry script',
+    )));
+
+    // ── Entry HTML local script references ────────────────────────────
+    violations.push(...(await checkEntryHtmlLocalScripts(payloadDir)));
+
+    return violations;
+}
+
+/**
+ * Verify *declaredPath* exists under *payloadDir* and does not escape.
+ */
+async function checkFileExistsWithinPayload(payloadDir, declaredPath, label) {
+    const resolved = path.resolve(payloadDir, declaredPath);
+
+    try {
+        path.relative(payloadDir, resolved);
+    } catch {
+        return [{
+            file: 'build-manifest.json',
+            string: declaredPath,
+            reason: `${label} path is not resolvable relative to payload root`,
+            expected: IOS_WRAPPER_CONTRACT.expectedPosture,
+        }];
+    }
+
+    if (!resolved.startsWith(path.resolve(payloadDir) + path.sep) &&
+        resolved !== path.resolve(payloadDir)) {
+        return [{
+            file: 'build-manifest.json',
+            string: declaredPath,
+            reason: `${label} escapes the payload root`,
+            expected: IOS_WRAPPER_CONTRACT.expectedPosture,
+        }];
+    }
+
+    try {
+        await readFile(resolved);
+    } catch {
+        return [{
+            file: declaredPath,
+            string: declaredPath,
+            reason: `${label} is missing: ${declaredPath}`,
+            expected: IOS_WRAPPER_CONTRACT.expectedPosture,
+        }];
+    }
+
+    return [];
+}
+
+/**
+ * Check that local <script src="..."> references in the entry HTML exist.
+ * External URLs (http://, https://) are skipped.
+ */
+async function checkEntryHtmlLocalScripts(payloadDir) {
+    const violations = [];
+    const entryHtmlPath = path.join(payloadDir, IOS_WRAPPER_CONTRACT.entryDocument);
+    const entryHtmlDir = path.dirname(entryHtmlPath);
+
+    let html;
+    try {
+        html = await readFile(entryHtmlPath, 'utf8');
+    } catch {
+        return violations; // already reported above
+    }
+
+    const scriptSrcRe = /<script\s[^>]*\bsrc\s*=\s*"([^"]+)"[^>]*>/gi;
+    let match;
+    while ((match = scriptSrcRe.exec(html)) !== null) {
+        const src = match[1];
+        // Skip external URLs
+        if (src.startsWith('http://') || src.startsWith('https://') || src.startsWith('//')) {
+            continue;
+        }
+        // Resolve relative to the entry HTML's directory
+        const resolved = path.resolve(entryHtmlDir, src.split('?')[0].split('#')[0]);
+
+        if (!resolved.startsWith(path.resolve(payloadDir))) {
+            violations.push({
+                file: IOS_WRAPPER_CONTRACT.entryDocument,
+                string: src,
+                reason: `script src escapes payload root: ${src}`,
+                expected: IOS_WRAPPER_CONTRACT.expectedPosture,
+            });
+            continue;
+        }
+
+        try {
+            await readFile(resolved);
+        } catch {
+            violations.push({
+                file: IOS_WRAPPER_CONTRACT.entryDocument,
+                string: src,
+                reason: `script src references missing file: ${src}`,
+                expected: IOS_WRAPPER_CONTRACT.expectedPosture,
+            });
+        }
     }
 
     return violations;

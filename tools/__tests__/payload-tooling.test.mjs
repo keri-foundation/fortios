@@ -78,6 +78,8 @@ describe('validate-mobile-payload.mjs', () => {
             '<script>window.location.replace(\'./fortweb/app/index.html\');</script>'
         );
         await writeTextFile(path.join(payloadDir, 'fortweb', 'app', 'index.html'), '<h1>KERI Wallet</h1>');
+        // Must include the declared entry script file
+        await writeTextFile(path.join(payloadDir, 'fortweb', 'app', 'app', 'main.js'), 'console.log("loaded");');
 
         const { stdout } = await runNodeScript(validateMobilePayloadScript, [
             '--payload-dir',
@@ -87,6 +89,129 @@ describe('validate-mobile-payload.mjs', () => {
         ]);
 
         expect(stdout).toContain('[payload-check] result: PASS');
+    });
+
+    it('fails when declared entry script is missing', async () => {
+        const payloadDir = await makeTempDir();
+        await writeJsonFile(path.join(payloadDir, 'build-manifest.json'), makeSharedManifest());
+        await writeTextFile(
+            path.join(payloadDir, 'index.html'),
+            '<script>window.location.replace(\'./fortweb/app/index.html\');</script>'
+        );
+        await writeTextFile(path.join(payloadDir, 'fortweb', 'app', 'index.html'), '<h1>KERI Wallet</h1>');
+        // entry_script declares fortweb/app/app/main.js but only main.ts exists
+        await writeTextFile(path.join(payloadDir, 'fortweb', 'app', 'app', 'main.ts'), 'console.log("source");');
+
+        const error = await runNodeScriptExpectFailure(validateMobilePayloadScript, [
+            '--payload-dir',
+            payloadDir,
+            '--target',
+            'ios-webpayload',
+        ]);
+
+        expect(error.stdout).toContain('missing');
+        expect(error.stdout).toContain('main.js');
+        expect(error.stdout).toContain('[payload-check] result: FAIL');
+    });
+
+    it('fails when declared entry script path escapes payload root', async () => {
+        const payloadDir = await makeTempDir();
+        // The manifest field check compares against the expected value for
+        // ios-webpayload.  Use a manifest with a traversal value AND a
+        // non-matching producer so the manifest check also catches it.
+        await writeJsonFile(
+            path.join(payloadDir, 'build-manifest.json'),
+            makeSharedManifest({
+                producer: 'fortweb-shared',
+                payload_profile: 'product-shell',
+                entry_document: 'fortweb/app/index.html',
+                entry_script: '../../etc/passwd',
+            })
+        );
+        await writeTextFile(
+            path.join(payloadDir, 'index.html'),
+            '<script>window.location.replace(\'./fortweb/app/index.html\');</script>'
+        );
+        await writeTextFile(path.join(payloadDir, 'fortweb', 'app', 'index.html'), '<h1>KERI Wallet</h1>');
+
+        const error = await runNodeScriptExpectFailure(validateMobilePayloadScript, [
+            '--payload-dir',
+            payloadDir,
+            '--target',
+            'ios-webpayload',
+        ]);
+
+        expect(error.stdout).toContain('[payload-check] result: FAIL');
+    });
+
+    it('fails when entry HTML references a missing local script', async () => {
+        const payloadDir = await makeTempDir();
+        await writeJsonFile(path.join(payloadDir, 'build-manifest.json'), makeSharedManifest());
+        await writeTextFile(
+            path.join(payloadDir, 'index.html'),
+            '<script>window.location.replace(\'./fortweb/app/index.html\');</script>'
+        );
+        // Entry HTML references a script that does not exist
+        await writeTextFile(
+            path.join(payloadDir, 'fortweb', 'app', 'index.html'),
+            '<script src="./missing-script.js"></script>'
+        );
+        // The declared entry_script exists (main.js)
+        await writeTextFile(path.join(payloadDir, 'fortweb', 'app', 'app', 'main.js'), 'console.log("loaded");');
+
+        const error = await runNodeScriptExpectFailure(validateMobilePayloadScript, [
+            '--payload-dir',
+            payloadDir,
+            '--target',
+            'ios-webpayload',
+        ]);
+
+        expect(error.stdout).toContain('missing file');
+        expect(error.stdout).toContain('[payload-check] result: FAIL');
+    });
+
+    it('passes when entry HTML references existing local scripts', async () => {
+        const payloadDir = await makeTempDir();
+        await writeJsonFile(path.join(payloadDir, 'build-manifest.json'), makeSharedManifest());
+        await writeTextFile(
+            path.join(payloadDir, 'index.html'),
+            '<script>window.location.replace(\'./fortweb/app/index.html\');</script>'
+        );
+        await writeTextFile(
+            path.join(payloadDir, 'fortweb', 'app', 'index.html'),
+            '<script type="module" src="./app/main.js"></script>'
+        );
+        await writeTextFile(path.join(payloadDir, 'fortweb', 'app', 'app', 'main.js'), 'console.log("loaded");');
+
+        const { stdout } = await runNodeScript(validateMobilePayloadScript, [
+            '--payload-dir',
+            payloadDir,
+            '--target',
+            'ios-webpayload',
+        ]);
+
+        expect(stdout).toContain('[payload-check] result: PASS');
+    });
+
+    it('fails when entry document is missing', async () => {
+        const payloadDir = await makeTempDir();
+        await writeJsonFile(path.join(payloadDir, 'build-manifest.json'), makeSharedManifest());
+        await writeTextFile(
+            path.join(payloadDir, 'index.html'),
+            '<script>window.location.replace(\'./fortweb/app/index.html\');</script>'
+        );
+        // No fortweb/app/index.html written
+        await writeTextFile(path.join(payloadDir, 'fortweb', 'app', 'app', 'main.js'), 'console.log("loaded");');
+
+        const error = await runNodeScriptExpectFailure(validateMobilePayloadScript, [
+            '--payload-dir',
+            payloadDir,
+            '--target',
+            'ios-webpayload',
+        ]);
+
+        expect(error.stdout).toContain('missing');
+        expect(error.stdout).toContain('[payload-check] result: FAIL');
     });
 
     it('fails for a blocked manifest posture', async () => {
@@ -118,6 +243,7 @@ describe('validate-mobile-payload.mjs', () => {
             '<script>window.location.replace(\'./fortweb/app/index.html\');</script>'
         );
         await writeTextFile(path.join(payloadDir, 'fortweb', 'app', 'index.html'), '<p>Profile ID</p>');
+        await writeTextFile(path.join(payloadDir, 'fortweb', 'app', 'app', 'main.js'), 'console.log("loaded");');
 
         const error = await runNodeScriptExpectFailure(validateMobilePayloadScript, [
             '--payload-dir',
