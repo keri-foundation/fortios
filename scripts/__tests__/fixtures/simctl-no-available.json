@@ -1,0 +1,12 @@
+{
+  "devices": {
+    "com.apple.CoreSimulator.SimRuntime.iOS-26-4": [
+      {
+        "udid": "EMPTY-EMPTY-EMPTY-EMPTY-EMPTY",
+        "name": "iPhone 17 Pro",
+        "state": "Shutdown",
+        "isAvailable": false
+      }
+    ]
+  }
+}

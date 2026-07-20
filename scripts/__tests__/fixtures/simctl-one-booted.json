@@ -1,0 +1,12 @@
+{
+  "devices": {
+    "com.apple.CoreSimulator.SimRuntime.iOS-26-4": [
+      {
+        "udid": "BOOT-0001-0001-0001-0001-0001",
+        "name": "iPhone 17 Pro",
+        "state": "Booted",
+        "isAvailable": true
+      }
+    ]
+  }
+}
