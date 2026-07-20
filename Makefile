@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-XCODE_PROJECT := xcodeproj/KeriWallet/KeriWallet.xcodeproj
+XCODE_PROJECT := KeriWallet.xcodeproj
 SCHEME        := KeriWallet
 APP_BUNDLE_ID := com.kerifoundation.wallet
 PAYLOAD_SOURCE ?= fortweb
@@ -35,7 +35,7 @@ DEVICE_REF    ?=
 # FortWeb-driven Xcode preparation
 XCODE_READY_TESTS ?= 1
 
-.PHONY: help setup pyodide sync sync-fortweb payload-contract ios-doctor ios-resolve-sim ios-list-sims ios-list-devices xcode-ready dev-sim run-sim dev-device run-device parity-smoke logs-sim logs-device build test-swift test-ts test-e2e test-e2e-slow test-all bridge-check lint lint-ts open clean archive export upload
+.PHONY: help setup pyodide sync sync-fortweb payload-contract ios-doctor ios-resolve-sim ios-list-sims ios-list-devices xcode-ready dev-sim run-sim dev-device run-device parity-smoke logs-sim logs-device build test-swift test-ts test-e2e test-e2e-slow test-all bridge-check lint lint-ts open clean clean-payload clean-runtime clean-all doctor archive export upload
 
 help: ## Show available make targets
 	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | \
@@ -248,8 +248,60 @@ open: ## Open KeriWallet.xcodeproj in Xcode
 lint: ## Run SwiftLint on all Swift sources (--strict)
 	cd $(CURDIR) && swiftlint lint --config .swiftlint.yml --strict
 
-clean: ## Remove build artifacts (DerivedData, test results, dist)
+# ── Cleanup targets ───────────────────────────────────────────────────────────
+
+clean: ## Remove build artifacts, caches, and temporary output (safe daily cleanup)
 	rm -rf $(SIM_DERIVED_DATA) $(DEVICE_DERIVED_DATA) $(TEST_RESULTS) $(ARCHIVE_PATH) $(EXPORT_DIR) dist
+	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+	find . -type f -name '*.pyc' -delete 2>/dev/null || true
+	find . -type f -name '.DS_Store' -delete 2>/dev/null || true
+	find . -type d -name .pytest_cache -exec rm -rf {} + 2>/dev/null || true
+	rm -rf test-results
+
+clean-payload: ## Remove staged mobile payload (regenerate with make xcode-ready)
+	@echo "Removing WebPayload/ ..."
+	rm -rf WebPayload
+	@echo "Regenerate: make xcode-ready FORTWEB_DIR=../FortWeb"
+
+clean-runtime: ## Remove downloaded Pyodide runtime (regenerate with make pyodide)
+	@echo "Removing public/pyodide/ ..."
+	rm -rf public/pyodide
+	@echo "Regenerate: make pyodide"
+
+clean-all: clean clean-payload clean-runtime ## Full developer reset (preserves source, .git, node_modules)
+
+# ── Diagnostics ───────────────────────────────────────────────────────────────
+
+doctor: ## Report environment state without mutation
+	@echo "=== Xcode ==="
+	@command -v xcodebuild >/dev/null && xcodebuild -version 2>/dev/null || echo "  not found"
+	@echo "iOS SDK: $$(xcrun --sdk iphonesimulator --show-sdk-version 2>/dev/null || echo unknown)"
+	@echo "Swift: $$(xcrun swift --version 2>/dev/null | head -1 || echo unknown)"
+	@echo "Deployment target: $$(xcodebuild -project $(XCODE_PROJECT) -showBuildSettings 2>/dev/null | awk '/IPHONEOS_DEPLOYMENT_TARGET/ {print $$3}' | head -1)"
+	@echo ""
+	@echo "=== Simulator ==="
+	@SIMULATOR_UDID="$(SIMULATOR_UDID)" SIMULATOR_NAME="$(SIMULATOR_NAME)" SIMULATOR_OS="$(SIMULATOR_OS)" \
+	  python3 scripts/resolve-ios-simulator.py 2>/dev/null || echo "  No compatible simulator found"
+	@echo ""
+	@echo "=== FortWeb ==="
+	@echo "FORTWEB_DIR: $(FORTWEB_DIR)"
+	@echo "Payload present: $$([ -d WebPayload/fortweb ] && echo yes || echo no)"
+	@echo "Payload valid: $$(node tools/validate-mobile-payload.mjs --payload-dir WebPayload --target ios-webpayload 2>/dev/null | grep result || echo unknown)"
+	@echo ""
+	@echo "=== TypeScript ==="
+	@echo "Node: $$(node --version 2>/dev/null || echo unknown)"
+	@echo "npm: $$(npm --version 2>/dev/null || echo unknown)"
+	@echo "Bridge: $$(node tools/gen-bridge-contract.mjs --check 2>/dev/null | tail -1 || echo unknown)"
+	@echo ""
+	@echo "=== SwiftLint ==="
+	@command -v swiftlint >/dev/null && swiftlint version 2>/dev/null || echo "  not installed"
+	@echo ""
+	@echo "=== Pyodide ==="
+	@echo "Pyodide present: $$([ -d public/pyodide ] && echo yes || echo 'no (run make pyodide)')"
+	@echo ""
+	@echo "=== Git ==="
+	@echo "Branch: $$(git branch --show-current 2>/dev/null)"
+	@echo "Dirty: $$(git status --short 2>/dev/null | grep -v '^??' | head -5 || echo clean)"
 
 # ── TestFlight targets ────────────────────────────────────────────────────────
 

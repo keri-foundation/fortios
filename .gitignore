@@ -33,3 +33,7 @@ __pycache__/
 # IDE
 .sourcekit-lsp/
 *.swp
+
+# Test output
+test-results/
+.pytest_cache/

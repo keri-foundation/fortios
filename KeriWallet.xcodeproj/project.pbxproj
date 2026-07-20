@@ -28,7 +28,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		AAFACADE00000001CAFEBABE /* WebPayload */ = {isa = PBXFileReference; lastKnownFileType = folder; name = WebPayload; path = ../../WebPayload; sourceTree = "<group>"; };
+		AAFACADE00000001CAFEBABE /* WebPayload */ = {isa = PBXFileReference; lastKnownFileType = folder; name = WebPayload; path = WebPayload; sourceTree = "<group>"; };
 		E0F91F902F48E06A000C52E9 /* KeriWallet.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = KeriWallet.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		E0F91FA62F48E06C000C52E9 /* KeriWalletTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = KeriWalletTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		E0F91FB02F48E06C000C52E9 /* KeriWalletUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = KeriWalletUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -259,15 +259,15 @@
 			files = (
 			);
 			inputPaths = (
-				"$(SRCROOT)/../../sync-payload.sh",
+				"$(SRCROOT)/sync-payload.sh",
 			);
 			name = "Ensure FortWeb Payload";
 			outputPaths = (
-				"$(SRCROOT)/../../WebPayload/.gitkeep",
+				"$(SRCROOT)/WebPayload/.gitkeep",
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/bash;
-			shellScript = "cd \"${SRCROOT}/../..\"\nif [ -d WebPayload/fortweb ]; then\n  echo \"WebPayload/ is present — skipping sync.\"\nelse\n  echo \"WebPayload/ is missing — run make sync or make xcode-ready.\"\n  exit 1\nfi\n";
+			shellScript = "cd \"${SRCROOT}\"\nif [ -d WebPayload/fortweb ]; then\n  echo \"WebPayload/ is present — skipping sync.\"\nelse\n  echo \"WebPayload/ is missing — run make sync or make xcode-ready.\"\n  exit 1\nfi\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
