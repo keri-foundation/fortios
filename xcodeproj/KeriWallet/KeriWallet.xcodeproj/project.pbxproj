@@ -120,6 +120,7 @@
 			buildPhases = (
 				E0F91F8C2F48E06A000C52E9 /* Sources */,
 				E0F91F8D2F48E06A000C52E9 /* Frameworks */,
+				E0F91FC82F48E06A000C52E9 /* Ensure FortWeb Payload */,
 				E0F91F8E2F48E06A000C52E9 /* Resources */,
 			);
 			buildRules = (
@@ -250,6 +251,25 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		E0F91FC82F48E06A000C52E9 /* Ensure FortWeb Payload */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/../../sync-payload.sh",
+			);
+			name = "Ensure FortWeb Payload";
+			outputPaths = (
+				"$(SRCROOT)/../../WebPayload/.gitkeep",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/bash;
+			shellScript = "cd \"${SRCROOT}/../..\"\nif [ -d WebPayload/fortweb ]; then\n  echo \"WebPayload/ is present — skipping sync.\"\nelse\n  echo \"WebPayload/ is missing — run make sync or make xcode-ready.\"\n  exit 1\nfi\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		E0F91F8C2F48E06A000C52E9 /* Sources */ = {
