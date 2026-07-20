@@ -30,7 +30,7 @@ export const PYCHLORIDE_WHEEL = 'pychloride.whl';
 
 // ── Pyodide ──────────────────────────────────────────────────────────────────
 /** Pinned Pyodide version — must match download-pyodide.sh and wheel tags. */
-export const PYODIDE_VERSION = '0.29.1';
+const PYODIDE_VERSION = '0.29.1';
 
 // ── IndexedDB ────────────────────────────────────────────────────────────────
 /** Database name used by IndexedDBer for wallet persistence. */
