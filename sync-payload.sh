@@ -55,27 +55,13 @@ sync_fortweb_payload() {
     exit 1
   fi
 
-  if [[ ! -f "${FORTWEB_DIR}/app/index.html" ]]; then
-    echo "error: FortWeb app/index.html missing at ${FORTWEB_DIR}/app/index.html" 1>&2
-    exit 1
-  fi
-
-  if [[ ! -d "${FORTWEB_DIR}/wheels" ]]; then
-    echo "error: FortWeb wheels directory missing at ${FORTWEB_DIR}/wheels" 1>&2
-    exit 1
-  fi
-
   echo "[sync-payload] syncing compiled FortWeb payload into wrapper WebPayload/"
   mkdir -p "${WRAPPER_PAYLOAD_DIR}"
   rm -rf "${WRAPPER_PAYLOAD_DIR}"/*
-  mkdir -p "${WRAPPER_PAYLOAD_DIR}/fortweb/app"
 
-  # Copy compiled dist/runtime (includes app/, vendor/, pyscript-ci.toml)
+  # Copy compiled dist/runtime — includes app/, vendor/, pyscript-ci.toml,
+  # wheels/, and app/index.html (build-runtime.mjs copies all of these)
   cp -R "${FORTWEB_DIR}/dist/runtime/"* "${WRAPPER_PAYLOAD_DIR}/fortweb/"
-  # Entry HTML is not compiled by tsc — copy from source
-  cp "${FORTWEB_DIR}/app/index.html" "${WRAPPER_PAYLOAD_DIR}/fortweb/app/index.html"
-  # Wheels are not in dist/runtime — copy from source
-  cp -R "${FORTWEB_DIR}/wheels" "${WRAPPER_PAYLOAD_DIR}/fortweb/wheels"
   write_fortweb_redirect
   write_fortweb_manifest
 }
