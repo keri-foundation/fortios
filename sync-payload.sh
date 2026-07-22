@@ -84,7 +84,7 @@ sync_fortweb_payload() {
   "storage": {
     "storageNamespace": "fort-wkwebview",
     "indexedDbRequired": false,
-    "originPartition": "fort-wkwebview"
+    "originPartition": "app://local"
   },
   "capabilities": {
     "customScheme": true,
