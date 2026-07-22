@@ -60,8 +60,15 @@ sync_fortweb_payload() {
   rm -rf "${WRAPPER_PAYLOAD_DIR}"/*
 
   # Copy compiled dist/runtime — includes app/, vendor/, pyscript-ci.toml,
-  # wheels/, and app/index.html (build-runtime.mjs copies all of these)
+  # and wheels/.
+  mkdir -p "${WRAPPER_PAYLOAD_DIR}/fortweb"
   cp -R "${FORTWEB_DIR}/dist/runtime/"* "${WRAPPER_PAYLOAD_DIR}/fortweb/"
+
+  # Copy static web assets that build-runtime does not bundle
+  cp "${FORTWEB_DIR}/app/index.html" "${WRAPPER_PAYLOAD_DIR}/fortweb/app/index.html"
+  cp -R "${FORTWEB_DIR}/app/styles" "${WRAPPER_PAYLOAD_DIR}/fortweb/app/styles"
+  cp -R "${FORTWEB_DIR}/app/assets" "${WRAPPER_PAYLOAD_DIR}/fortweb/app/assets"
+
   write_fortweb_redirect
   write_fortweb_manifest
 }
