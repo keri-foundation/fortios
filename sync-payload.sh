@@ -69,6 +69,33 @@ sync_fortweb_payload() {
   cp -R "${FORTWEB_DIR}/app/styles" "${WRAPPER_PAYLOAD_DIR}/fortweb/app/styles"
   cp -R "${FORTWEB_DIR}/app/assets" "${WRAPPER_PAYLOAD_DIR}/fortweb/app/assets"
 
+  # Generate iOS runtime-origin contract (injected at runtime by WebContainerViewController)
+  cat > "${WRAPPER_PAYLOAD_DIR}/fortweb/app/runtime-origin-contract.json" <<'CONTRACT'
+{
+  "schema": "fortweb.runtime-origin.v1",
+  "version": 1,
+  "platform": "ios-wkwebview",
+  "mode": "bundled-offline",
+  "documentOrigin": "app://local",
+  "appBaseUrl": "app://local",
+  "entryUrl": "app://local/index.html",
+  "workerUrl": "app://local/fortweb/app/runtime/wallet-worker.py",
+  "configUrl": "app://local/fortweb/pyscript-ci.toml",
+  "storage": {
+    "storageNamespace": "fort-wkwebview",
+    "indexedDbRequired": false,
+    "originPartition": "fort-wkwebview"
+  },
+  "capabilities": {
+    "customScheme": true,
+    "httpsLikeAssetOrigin": true,
+    "implicitBlobOriginSafe": "unknown",
+    "networkAllowed": false,
+    "bundledAssetsOnly": true
+  }
+}
+CONTRACT
+
   write_fortweb_redirect
   write_fortweb_manifest
 }
