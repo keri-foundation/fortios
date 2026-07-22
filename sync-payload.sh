@@ -88,8 +88,8 @@ sync_fortweb_payload() {
   },
   "capabilities": {
     "customScheme": true,
-    "httpsLikeAssetOrigin": true,
-    "implicitBlobOriginSafe": "unknown",
+    "httpsLikeAssetOrigin": false,
+    "implicitBlobOriginSafe": false,
     "networkAllowed": false,
     "bundledAssetsOnly": true
   }
