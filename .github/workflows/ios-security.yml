@@ -83,6 +83,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Build FortWeb runtime
+        run: |
+          npm ci --prefix "$FORTWEB_DIR"
+          npm run build:runtime --prefix "$FORTWEB_DIR"
+          test -f "$FORTWEB_DIR/dist/runtime/app/app/main.js"
+
       - name: Verify bridge contract output
         run: make bridge-check
 
@@ -124,6 +130,12 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Build FortWeb runtime
+        run: |
+          npm ci --prefix "$FORTWEB_DIR"
+          npm run build:runtime --prefix "$FORTWEB_DIR"
+          test -f "$FORTWEB_DIR/dist/runtime/app/app/main.js"
 
       - name: Enforce wrapper payload contract
         run: make payload-contract
