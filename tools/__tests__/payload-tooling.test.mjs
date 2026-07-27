@@ -309,3 +309,119 @@ describe('gen-fortweb-bundle-manifest.mjs', () => {
         expect(manifest.sync_targets.map((entry) => entry.id)).toEqual(['ios-webpayload']);
     });
 });
+
+// --------------------------------------------------------------------------
+// Bridge contract generator: export-visibility regression test
+// --------------------------------------------------------------------------
+
+describe('gen-bridge-contract.mjs exports', () => {
+    const genScript = path.join(repoRoot, 'tools', 'gen-bridge-contract.mjs');
+    const contractSource = path.join(repoRoot, 'bridge-contract.json');
+
+    const ALLOWED_EXPORTS = Object.freeze([
+        'BRIDGE_HANDLER_NAME',
+        'BRIDGE_MESSAGE_TYPES',
+        'WORKER_COMMAND_TYPES',
+        'WORKER_RESULT_TYPES',
+    ]);
+
+    /** Set up a scratch dir that mimics the repo layout so the generator
+     *  resolves its fixed relative paths (bridge-contract.json, src/, KeriWallet/, generated/).
+     *  The generator uses resolve(__dirname, '..') for ROOT, so we place it in
+     *  a tools/ subdir. */
+    async function setupGenSandbox() {
+        const workDir = await makeTempDir();
+        const toolsDir = path.join(workDir, 'tools');
+        const genFile = path.join(toolsDir, 'gen-bridge-contract.mjs');
+        const contractFile = path.join(workDir, 'bridge-contract.json');
+        const srcDir = path.join(workDir, 'src');
+        const tsOut = path.join(srcDir, 'bridge-contract.ts');
+        await mkdir(toolsDir);
+        await mkdir(srcDir);
+        // Foundation output paths (not the donor's xcodeproj layout)
+        await mkdir(path.join(workDir, 'KeriWallet'), { recursive: true });
+        await mkdir(path.join(workDir, 'generated'));
+        await writeFile(genFile, await readFile(genScript, 'utf8'));
+        await writeFile(contractFile, await readFile(contractSource, 'utf8'));
+        return { workDir, genFile, tsOut };
+    }
+
+    async function runGen(workDir, genFile) {
+        await execFile('node', [genFile], { cwd: workDir, encoding: 'utf8' });
+    }
+
+    it('produces exactly 4 public const exports', async () => {
+        const { workDir, genFile, tsOut } = await setupGenSandbox();
+        await runGen(workDir, genFile);
+
+        const output = await readFile(tsOut, 'utf8');
+
+        // 4 public exports — no more, no fewer
+        const exportLines = output
+            .split('\n')
+            .filter((line) => /^export const /.test(line));
+        expect(exportLines).toHaveLength(4);
+        expect(exportLines[0]).toMatch(/^export const BRIDGE_HANDLER_NAME = /);
+        expect(exportLines[1]).toMatch(/^export const BRIDGE_MESSAGE_TYPES = /);
+        expect(exportLines[2]).toMatch(/^export const WORKER_COMMAND_TYPES = /);
+        expect(exportLines[3]).toMatch(/^export const WORKER_RESULT_TYPES = /);
+    });
+
+    it('does not export individual string scalars', async () => {
+        const { workDir, genFile, tsOut } = await setupGenSandbox();
+        await runGen(workDir, genFile);
+
+        const output = await readFile(tsOut, 'utf8');
+
+        // These individual string scalars should NOT be exported (they
+        // are used privately to build the array exports above).
+        const forbiddenExports = [
+            'BRIDGE_CONTRACT_VERSION',
+            'BRIDGE_HANDLER_SOURCE_SWIFT',
+            'BRIDGE_HANDLER_SOURCE_KOTLIN',
+            'LIFECYCLE_BOOT',
+            'BRIDGE_JS_ERROR',
+            'WORKER_CMD_INIT',
+            'WORKER_RES_READY',
+        ];
+        for (const name of forbiddenExports) {
+            expect(output).not.toMatch(
+                new RegExp('^export const ' + name),
+            );
+        }
+
+        // Prove the complete export-name set equals exactly the four
+        // allowed names — accidental extra exports fail automatically.
+        const exportNames = output
+            .split('\n')
+            .filter((line) => /^export const /.test(line))
+            .map((line) => line.match(/^export const (\w+)/)?.[1])
+            .filter(Boolean);
+        expect(new Set(exportNames)).toEqual(new Set(ALLOWED_EXPORTS));
+    });
+
+    it('is idempotent', async () => {
+        const { workDir, genFile } = await setupGenSandbox();
+
+        await runGen(workDir, genFile);
+        const ts1 = await readFile(
+            path.join(workDir, 'src', 'bridge-contract.ts'), 'utf8');
+        const swift1 = await readFile(
+            path.join(workDir, 'KeriWallet', 'BridgeContract.swift'), 'utf8');
+        const kt1 = await readFile(
+            path.join(workDir, 'generated', 'BridgeContract.kt'), 'utf8');
+
+        // Second run should produce identical output for all three languages
+        await runGen(workDir, genFile);
+        const ts2 = await readFile(
+            path.join(workDir, 'src', 'bridge-contract.ts'), 'utf8');
+        const swift2 = await readFile(
+            path.join(workDir, 'KeriWallet', 'BridgeContract.swift'), 'utf8');
+        const kt2 = await readFile(
+            path.join(workDir, 'generated', 'BridgeContract.kt'), 'utf8');
+
+        expect(ts2).toBe(ts1);
+        expect(swift2).toBe(swift1);
+        expect(kt2).toBe(kt1);
+    });
+});
