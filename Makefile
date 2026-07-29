@@ -35,7 +35,7 @@ DEVICE_REF    ?=
 # FortWeb-driven Xcode preparation
 XCODE_READY_TESTS ?= 1
 
-.PHONY: help setup pyodide sync sync-fortweb payload-contract ios-doctor ios-resolve-sim ios-list-sims ios-list-devices xcode-ready dev-sim run-sim dev-device run-device parity-smoke logs-sim logs-device build test-swift test-ts test-e2e test-e2e-slow test-all bridge-check lint lint-ts open clean clean-payload clean-runtime clean-all doctor generated-check knip archive export upload
+.PHONY: help setup pyodide sync sync-fortweb payload-contract check-contract ios-doctor ios-resolve-sim ios-list-sims ios-list-devices xcode-ready dev-sim run-sim dev-device run-device parity-smoke logs-sim logs-device build test-swift test-ts test-e2e test-e2e-slow test-all bridge-check lint lint-ts open clean clean-payload clean-runtime clean-all doctor generated-check knip archive export upload
 
 help: ## Show available make targets
 	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | \
@@ -78,6 +78,16 @@ payload-contract: ## Fail closed on blocked payload regressions and validate sta
 	node tools/assert-no-proof-demo-shell.mjs
 	PAYLOAD_SOURCE=fortweb FORTWEB_DIR=$(FORTWEB_DIR) ./sync-payload.sh
 	node tools/validate-mobile-payload.mjs --payload-dir WebPayload --target ios-webpayload
+
+check-contract: ## Verify runtime-origin-contract.json exists and is valid JSON
+	@if [ ! -f WebPayload/fortweb/app/runtime-origin-contract.json ]; then \
+	  echo "ERROR: runtime-origin-contract.json is missing from WebPayload."; \
+	  echo "Run: make sync FORTWEB_DIR=../fortweb"; \
+	  exit 1; \
+	fi
+	@python3 -c "import json; json.load(open('WebPayload/fortweb/app/runtime-origin-contract.json'))" \
+	  || (echo "ERROR: runtime-origin-contract.json is not valid JSON." && exit 1)
+	@echo "[check-contract] runtime-origin-contract.json is present and valid."
 
 ios-list-sims: ## List available iOS Simulator destinations
 	xcrun simctl list devices available
@@ -153,7 +163,7 @@ xcode-ready: ## Prepare the repository for opening in Xcode (press Play after)
 	@SIMULATOR_UDID="$(SIMULATOR_UDID)" SIMULATOR_NAME="$(SIMULATOR_NAME)" SIMULATOR_OS="$(SIMULATOR_OS)" \
 	  python3 scripts/resolve-ios-simulator.py 2>/dev/null || true
 
-dev-sim: sync lint-ts test-ts build ## Sync payload, run TS checks, and build for Simulator
+dev-sim: sync check-contract lint-ts test-ts build ## Sync payload, run TS checks, and build for Simulator
 
 run-sim: ## Boot, install, and launch on the resolved Simulator
 	@if [ "$(SIM_UDID)" = "SIM_UNRESOLVED" ]; then \
