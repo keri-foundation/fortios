@@ -13,7 +13,8 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "knip": "knip",
-    "knip:production": "knip --production"
+    "knip:production": "knip --production",
+    "runtime:import": "node tools/import-fortweb-runtime-package.mjs"
   },
   "engines": {
     "node": "22.12.0"
