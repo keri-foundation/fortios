@@ -433,41 +433,31 @@ import { execSync } from 'node:child_process';
 const importScript = path.join(repoRoot, 'tools', 'import-fortweb-runtime-package.mjs');
 
 /**
- * Create a minimal valid ZIP with a build-manifest and one entry.
+ * Create a minimal valid ZIP with a manifest and one entry in the canonical
+ * FortWeb runtime package format (manifest.json, checksums.sha256).
  * Uses system `zip` command. All fixtures are generated in temp dirs.
  */
-function createTestZip(tempDir, { packageName = 'fortweb-wallet', manifestOverrides = {}, extraFiles = [] } = {}) {
+function createTestZip(tempDir, { packageName = 'fortweb-runtime', manifestOverrides = {}, extraFiles = [] } = {}) {
     const pkgDir = path.join(tempDir, packageName);
     const zipPath = path.join(tempDir, 'test-package.zip');
 
-    // Build manifest
+    // Build manifest in canonical FortWeb producer format
     const manifest = {
-        schema: 2,
-        created_at: new Date().toISOString(),
+        schema_version: '1.0.0',
+        package_version: '0.0.0',
         package_name: packageName,
-        producer: 'fortweb-shared',
-        payload_profile: 'product-shell',
-        entry_document: 'fortweb/app/index.html',
-        entry_script: 'fortweb/app/app/main.js',
-        build_command: 'test',
-        git_sha: '0000000000000000000000000000000000000000',
-        source_git_branch: 'test',
-        source_git_status: 'clean',
-        node_version: null,
-        npm_user_agent: null,
-        package_lock_sha256: null,
-        pyodide_worker_mode: 'pyscript-pyworker',
-        pyodide_asset_path: '/fortweb/vendor/pyodide/0.29.3/pyodide.mjs',
-        pyodide_asset_mode: 'esm',
-        sync_targets: [],
+        producer: 'fortweb',
+        payload_profile: 'offline-runtime',
+        fortweb_commit_sha: '0000000000000000000000000000000000000000',
+        runtime_origin: 'https://appassets.androidplatform.net',
+        entrypoint: 'app/index.html',
         files: [],
         ...manifestOverrides,
     };
 
     // Compute file hashes for entry document + extra files
-    const files = [];
-    const entryRel = 'fortweb/app/index.html';
-    mkdirSync(path.join(pkgDir, 'fortweb/app'), { recursive: true });
+    const entryRel = 'app/index.html';
+    mkdirSync(path.join(pkgDir, 'app'), { recursive: true });
 
     const entryContent = '<!DOCTYPE html><html><head><title>Test</title></head><body>KERI</body></html>';
     writeFileSync(path.join(pkgDir, entryRel), entryContent);
@@ -486,21 +476,21 @@ function createTestZip(tempDir, { packageName = 'fortweb-wallet', manifestOverri
         // Keep the override — used for testing mismatches
     } else {
         // Auto-compute files from what was created
-        manifest.files = [{ path: entryRel, sha256: entryHash, size: entrySize }];
+        manifest.files = [{ path: entryRel, sha256: entryHash, bytes: entrySize }];
         for (const ef of extraFiles) {
             const efHash = createHash('sha256').update(ef.content).digest('hex');
-            manifest.files.push({ path: ef.path, sha256: efHash, size: Buffer.byteLength(ef.content) });
+            manifest.files.push({ path: ef.path, sha256: efHash, bytes: Buffer.byteLength(ef.content) });
         }
     }
 
     // Write manifest
     const manifestJson = JSON.stringify(manifest, null, 2);
-    writeFileSync(path.join(pkgDir, 'build-manifest.json'), manifestJson);
+    writeFileSync(path.join(pkgDir, 'manifest.json'), manifestJson);
 
     // Write checksum file
     const manifestHash = createHash('sha256').update(manifestJson).digest('hex');
-    const checksumContent = `${manifestHash}  build-manifest.json\n`;
-    writeFileSync(path.join(pkgDir, 'SHA256SUMS'), checksumContent);
+    const checksumContent = `${manifestHash}  manifest.json\n`;
+    writeFileSync(path.join(pkgDir, 'checksums.sha256'), checksumContent);
 
     // Create ZIP (run from inside tempDir so paths are relative)
     const cwd = process.cwd();
@@ -542,12 +532,12 @@ describe('import-fortweb-runtime-package.mjs', () => {
 
         const { stdout } = await importZip(zipPath);
         expect(stdout).toContain('Import complete');
-        expect(stdout).toContain('fortweb-wallet');
+        expect(stdout).toContain('fortweb-runtime');
 
         // Verify WebPayload was populated
-        const bp = path.join(repoRoot, 'WebPayload', 'build-manifest.json');
+        const bp = path.join(repoRoot, 'WebPayload', 'manifest.json');
         const manifestBytes = await readFile(bp, 'utf-8');
-        expect(manifestBytes).toContain('fortweb-wallet');
+        expect(manifestBytes).toContain('fortweb-runtime');
     });
 
     it('rejects a missing ZIP path', async () => {
@@ -573,7 +563,7 @@ describe('import-fortweb-runtime-package.mjs', () => {
         const tempDir = await makeTempDir();
         const { zipPath } = createTestZip(tempDir, {
             manifestOverrides: {
-                files: [{ path: 'fortweb/app/index.html', sha256: 'a'.repeat(64), size: 100 }],
+                files: [{ path: 'app/index.html', sha256: 'a'.repeat(64), bytes: 100 }],
             },
         });
 
@@ -587,31 +577,32 @@ describe('import-fortweb-runtime-package.mjs', () => {
         await importZip(zipPath);
 
         // Read back the manifest — should match exactly
-        const bp = path.join(repoRoot, 'WebPayload', 'build-manifest.json');
+        const bp = path.join(repoRoot, 'WebPayload', 'manifest.json');
         const importedManifest = JSON.parse(await readFile(bp, 'utf-8'));
-        expect(importedManifest.schema).toBe(manifest.schema);
+        expect(importedManifest.schema_version).toBe(manifest.schema_version);
         expect(importedManifest.package_name).toBe(manifest.package_name);
         expect(importedManifest.files).toHaveLength(manifest.files.length);
     });
 
     it('rejects when entry document is missing from package', async () => {
         const tempDir = await makeTempDir();
-        const pkgName = 'fortweb-wallet';
+        const pkgName = 'fortweb-runtime';
         const zipPath = path.join(tempDir, 'bad.zip');
         const pkgDir = path.join(tempDir, pkgName);
 
         mkdirSync(pkgDir, { recursive: true });
         const manifest = {
-            schema: 2, package_name: pkgName, producer: 'fortweb-shared',
-            payload_profile: 'product-shell', entry_document: 'fortweb/app/index.html',
-            entry_script: 'fortweb/app/app/main.js', build_command: 'test',
-            git_sha: '0'.repeat(40), source_git_branch: 'test', source_git_status: 'clean',
-            pyodide_worker_mode: 'pyscript-pyworker',
-            pyodide_asset_path: '/fortweb/vendor/pyodide/0.29.3/pyodide.mjs',
-            pyodide_asset_mode: 'esm', sync_targets: [],
-            files: [{ path: 'fortweb/app/index.html', sha256: '0'.repeat(64), size: 0 }],
+            schema_version: '1.0.0',
+            package_version: '0.0.0',
+            package_name: pkgName,
+            producer: 'fortweb',
+            payload_profile: 'offline-runtime',
+            fortweb_commit_sha: '0'.repeat(40),
+            runtime_origin: 'https://appassets.androidplatform.net',
+            entrypoint: 'app/index.html',
+            files: [{ path: 'app/index.html', sha256: '0'.repeat(64), bytes: 0 }],
         };
-        writeFileSync(path.join(pkgDir, 'build-manifest.json'), JSON.stringify(manifest));
+        writeFileSync(path.join(pkgDir, 'manifest.json'), JSON.stringify(manifest));
         // Don't create the entry document
 
         const cwd = process.cwd();
@@ -634,10 +625,10 @@ describe('import-fortweb-runtime-package.mjs', () => {
     it('rejects unsupported manifest schema', async () => {
         const tempDir = await makeTempDir();
         const { zipPath } = createTestZip(tempDir, {
-            manifestOverrides: { schema: 1 },
+            manifestOverrides: { schema_version: '' },
         });
 
-        await expect(importZip(zipPath)).rejects.toThrow(/unsupported manifest schema/);
+        await expect(importZip(zipPath)).rejects.toThrow(/invalid or missing schema_version/);
     });
 
     it('leaves existing WebPayload unchanged on failure', async () => {
@@ -647,7 +638,7 @@ describe('import-fortweb-runtime-package.mjs', () => {
         await importZip(validZip);
 
         // Read the current state
-        const bp = path.join(repoRoot, 'WebPayload', 'build-manifest.json');
+        const bp = path.join(repoRoot, 'WebPayload', 'manifest.json');
         const beforeManifest = await readFile(bp, 'utf-8');
 
         // Try importing a bad package

@@ -10,12 +10,15 @@
  * Usage:
  *   node tools/import-fortweb-runtime-package.mjs <runtime-package.zip>
  *
- * Contract (from build-manifest.json schema 2):
- *   - package_name:  fortweb-wallet
- *   - producer:      fortweb-shared
- *   - payload_profile: product-shell
- *   - entry_document: fortweb/app/index.html
- *   - entry_script:   fortweb/app/app/main.js
+ * Contract (from FortWeb runtime-package-manifest.mjs):
+ *   - package_name:   fortweb-runtime
+ *   - producer:       fortweb
+ *   - payload_profile: offline-runtime
+ *   - entrypoint:     app/index.html
+ *   - manifest:       manifest.json
+ *   - checksums:      checksums.sha256
+ *   - schema:         schema_version (string)
+ *   - file size:      bytes
  */
 
 import { createHash } from 'node:crypto';
@@ -31,11 +34,12 @@ import { tmpdir } from 'node:os';
 // --- Configuration ---
 const REPO_ROOT = path.resolve(import.meta.dirname, '..');
 const PAYLOAD_DEST = path.join(REPO_ROOT, 'WebPayload');
-const EXPECTED_PACKAGE_NAME = 'fortweb-wallet';
-const EXPECTED_PRODUCER = 'fortweb-shared';
-const EXPECTED_PROFILE = 'product-shell';
-const ENTRY_DOCUMENT = 'fortweb/app/index.html';
-const MANIFEST_FILENAME = 'build-manifest.json';
+const EXPECTED_PACKAGE_NAME = 'fortweb-runtime';
+const EXPECTED_PRODUCER = 'fortweb';
+const EXPECTED_PROFILE = 'offline-runtime';
+const ENTRY_DOCUMENT = 'app/index.html';
+const MANIFEST_FILENAME = 'manifest.json';
+const CHECKSUM_FILENAME = 'checksums.sha256';
 
 // --- Helpers ---
 
@@ -213,8 +217,8 @@ async function validateManifest(manifestPath, manifest) {
     errors.push('manifest is not a valid JSON object');
     return errors;
   }
-  if (manifest.schema !== 2) {
-    errors.push(`unsupported manifest schema: ${manifest.schema} (expected 2)`);
+  if (typeof manifest.schema_version !== 'string' || manifest.schema_version.trim().length === 0) {
+    errors.push(`invalid or missing schema_version: ${manifest.schema_version}`);
   }
   if (manifest.package_name !== EXPECTED_PACKAGE_NAME) {
     errors.push(`unexpected package_name: ${manifest.package_name} (expected ${EXPECTED_PACKAGE_NAME})`);
@@ -225,8 +229,8 @@ async function validateManifest(manifestPath, manifest) {
   if (manifest.payload_profile !== EXPECTED_PROFILE) {
     errors.push(`unexpected payload_profile: ${manifest.payload_profile} (expected ${EXPECTED_PROFILE})`);
   }
-  if (manifest.entry_document !== ENTRY_DOCUMENT) {
-    errors.push(`unexpected entry_document: ${manifest.entry_document} (expected ${ENTRY_DOCUMENT})`);
+  if (manifest.entrypoint !== ENTRY_DOCUMENT) {
+    errors.push(`unexpected entrypoint: ${manifest.entrypoint} (expected ${ENTRY_DOCUMENT})`);
   }
 
   // Validate files array
@@ -253,8 +257,8 @@ async function validateManifest(manifestPath, manifest) {
     if (typeof f.sha256 !== 'string' || f.sha256.length !== 64) {
       errors.push(`manifest file "${f.path}" has invalid sha256: ${f.sha256}`);
     }
-    if (typeof f.size !== 'number' || f.size < 0) {
-      errors.push(`manifest file "${f.path}" has invalid size: ${f.size}`);
+    if (typeof f.bytes !== 'number' || f.bytes < 0) {
+      errors.push(`manifest file "${f.path}" has invalid bytes: ${f.bytes}`);
     }
   }
 
@@ -274,8 +278,8 @@ async function validatePackageContents(extractDir, packageName, manifest) {
         errors.push(`manifest entry is not a regular file: ${f.path}`);
         continue;
       }
-      if (s.size !== f.size) {
-        errors.push(`size mismatch for "${f.path}": expected ${f.size}, got ${s.size}`);
+      if (s.size !== f.bytes) {
+        errors.push(`size mismatch for "${f.path}": expected ${f.bytes}, got ${s.size}`);
       }
       const hash = await sha256File(filePath);
       if (hash !== f.sha256) {
@@ -290,8 +294,11 @@ async function validatePackageContents(extractDir, packageName, manifest) {
     }
   }
 
-  // Verify no unexpected files exist beyond manifest-listed files
+  // Verify no unexpected files exist beyond manifest-listed files and package metadata
   const manifestPaths = new Set(manifest.files.map(f => f.path));
+  // Package metadata files live at the package root and are not runtime content
+  manifestPaths.add(MANIFEST_FILENAME);
+  manifestPaths.add(CHECKSUM_FILENAME);
   await walkDir(pkgRoot, '', manifestPaths, errors);
 
   return errors;
@@ -368,8 +375,8 @@ async function atomicReplace(srcDir, destDir, packageName) {
 
   // Write wrapper-owned redirect index.html outside the package subtree
   const redirectHtml = `<!DOCTYPE html>
-<html><head><meta http-equiv="refresh" content="0;url=./fortweb/app/index.html"></head>
-<body><a href="./fortweb/app/index.html">Launch FortWeb</a></body></html>\n`;
+<html><head><meta http-equiv="refresh" content="0;url=./${packageName}/app/index.html"></head>
+<body><a href="./${packageName}/app/index.html">Launch FortWeb</a></body></html>\n`;
   await writeFile(path.join(staging, 'index.html'), redirectHtml);
 
   // Atomic swap: remove old dest, rename staging
