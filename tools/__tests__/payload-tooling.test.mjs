@@ -658,3 +658,241 @@ describe('import-fortweb-runtime-package.mjs', () => {
         expect(afterManifest).toBe(beforeManifest);
     });
 });
+
+// --------------------------------------------------------------------------
+// Adversarial containment tests — canonical producer-format packages
+// --------------------------------------------------------------------------
+
+import {
+    createSymlinkZip,
+    createDuplicateEntryZip,
+    createDirSymlinkZip,
+    createArbitraryZip,
+} from './helpers/adversarial-zip.mjs';
+
+describe('runtime package containment — adversarial', () => {
+    it('rejects wrong producer', async () => {
+        const tempDir = await makeTempDir();
+        const { zipPath } = createTestZip(tempDir, {
+            manifestOverrides: { producer: 'wrong-producer' },
+        });
+
+        await expect(importZip(zipPath)).rejects.toThrow(/unexpected producer/);
+    });
+
+    it('rejects wrong payload_profile', async () => {
+        const tempDir = await makeTempDir();
+        const { zipPath } = createTestZip(tempDir, {
+            manifestOverrides: { payload_profile: 'wrong-profile' },
+        });
+
+        await expect(importZip(zipPath)).rejects.toThrow(/unexpected payload_profile/);
+    });
+
+    it('rejects wrong entrypoint', async () => {
+        const tempDir = await makeTempDir();
+        const { zipPath } = createTestZip(tempDir, {
+            manifestOverrides: { entrypoint: 'wrong/entry.html' },
+        });
+
+        await expect(importZip(zipPath)).rejects.toThrow(/unexpected entrypoint/);
+    });
+
+    it('rejects duplicate manifest file paths', async () => {
+        const tempDir = await makeTempDir();
+        const { zipPath } = createTestZip(tempDir, {
+            manifestOverrides: {
+                files: [
+                    { path: 'app/index.html', sha256: '0'.repeat(64), bytes: 0 },
+                    { path: 'app/index.html', sha256: '1'.repeat(64), bytes: 1 },
+                ],
+            },
+        });
+
+        await expect(importZip(zipPath)).rejects.toThrow(/duplicate manifest path/);
+    });
+
+    it('rejects unlisted extra file in package', async () => {
+        const tempDir = await makeTempDir();
+        // Create a ZIP with a valid manifest listing only app/index.html,
+        // but also include an unlisted file on disk.
+        const pkgName = 'fortweb-runtime';
+        const zipPath = path.join(tempDir, 'extra.zip');
+        const pkgDir = path.join(tempDir, pkgName);
+
+        mkdirSync(path.join(pkgDir, 'app'), { recursive: true });
+        writeFileSync(path.join(pkgDir, 'app', 'index.html'), '<html></html>');
+
+        const entryContent = '<html></html>';
+        const entryHash = createHash('sha256').update(entryContent).digest('hex');
+        const manifest = {
+            schema_version: '1.0.0',
+            package_version: '0.0.0',
+            package_name: 'fortweb-runtime',
+            producer: 'fortweb',
+            payload_profile: 'offline-runtime',
+            fortweb_commit_sha: '0'.repeat(40),
+            runtime_origin: 'https://appassets.androidplatform.net',
+            entrypoint: 'app/index.html',
+            files: [{ path: 'app/index.html', sha256: entryHash, bytes: Buffer.byteLength(entryContent) }],
+        };
+        writeFileSync(path.join(pkgDir, 'manifest.json'), JSON.stringify(manifest));
+
+        // Write checksum
+        const manifestJson = JSON.stringify(manifest);
+        const manifestHash = createHash('sha256').update(manifestJson).digest('hex');
+        writeFileSync(path.join(pkgDir, 'checksums.sha256'), `${manifestHash}  manifest.json\n`);
+
+        // Add unlisted extra file
+        writeFileSync(path.join(pkgDir, 'secret.txt'), 'should not be here');
+
+        const cwd = process.cwd();
+        process.chdir(tempDir);
+        execSync(`zip -qr "${zipPath}" "${pkgName}"`, { encoding: 'utf-8' });
+        process.chdir(cwd);
+
+        await expect(importZip(zipPath)).rejects.toThrow(/unexpected file/);
+    });
+
+    it('rejects byte-count mismatch', async () => {
+        const tempDir = await makeTempDir();
+        const { zipPath } = createTestZip(tempDir, {
+            manifestOverrides: {
+                files: [{ path: 'app/index.html', sha256: 'a'.repeat(64), bytes: 99999 }],
+            },
+        });
+
+        await expect(importZip(zipPath)).rejects.toThrow(/size mismatch/);
+    });
+
+    it('preserves exact bytes including non-ASCII content', async () => {
+        const tempDir = await makeTempDir();
+        const specialContent = '<html>\n<body>\n  <!-- € → λ → 🚀 -->\n  <p>null\u0000byte</p>\n</body>\n</html>\n';
+        const { zipPath } = createTestZip(tempDir, {
+            extraFiles: [{ path: 'unicode.txt', content: specialContent }],
+        });
+
+        await importZip(zipPath);
+
+        const importedPath = path.join(repoRoot, 'WebPayload', 'unicode.txt');
+        const importedContent = await readFile(importedPath, 'utf-8');
+        expect(importedContent).toBe(specialContent);
+    });
+
+    it('rejects ZIP with symlink entry', async () => {
+        const tempDir = await makeTempDir();
+        const zipPath = createSymlinkZip(tempDir, 'symlink.zip', 'fortweb-runtime/link', '/etc/passwd');
+
+        await expect(importZip(zipPath)).rejects.toThrow();
+    });
+
+    it('rejects ZIP with duplicate entries', async () => {
+        const tempDir = await makeTempDir();
+        const zipPath = createDuplicateEntryZip(tempDir, 'dup.zip', 'fortweb-runtime/manifest.json');
+
+        await expect(importZip(zipPath)).rejects.toThrow(/duplicate/);
+    });
+
+    it('rejects ZIP with directory symlink', async () => {
+        const tempDir = await makeTempDir();
+        const zipPath = createDirSymlinkZip(tempDir, 'dirsym.zip', 'fortweb-runtime/linkdir', '/etc');
+
+        await expect(importZip(zipPath)).rejects.toThrow();
+    });
+
+    it('accepts a package with all canonical producer identity fields', async () => {
+        const tempDir = await makeTempDir();
+        const { zipPath, manifest } = createTestZip(tempDir);
+
+        await importZip(zipPath);
+
+        const bp = path.join(repoRoot, 'WebPayload', 'manifest.json');
+        const imported = JSON.parse(await readFile(bp, 'utf-8'));
+
+        // All 8 required string fields must be present with correct types
+        expect(imported.schema_version).toBe('1.0.0');
+        expect(imported.package_version).toBe('0.0.0');
+        expect(imported.package_name).toBe('fortweb-runtime');
+        expect(imported.producer).toBe('fortweb');
+        expect(imported.payload_profile).toBe('offline-runtime');
+        expect(typeof imported.fortweb_commit_sha).toBe('string');
+        expect(imported.fortweb_commit_sha.length).toBe(40);
+        expect(typeof imported.runtime_origin).toBe('string');
+        expect(imported.entrypoint).toBe('app/index.html');
+        expect(Array.isArray(imported.files)).toBe(true);
+        expect(imported.files.length).toBe(manifest.files.length);
+
+        // File entries use canonical field names
+        for (const f of imported.files) {
+            expect(typeof f.path).toBe('string');
+            expect(typeof f.sha256).toBe('string');
+            expect(f.sha256).toHaveLength(64);
+            expect(typeof f.bytes).toBe('number');
+            expect(f.bytes).toBeGreaterThanOrEqual(0);
+            expect(f.size).toBeUndefined();
+        }
+    });
+
+    it('rejects ZIP with missing manifest.json', async () => {
+        const tempDir = await makeTempDir();
+        const pkgName = 'fortweb-runtime';
+        const zipPath = path.join(tempDir, 'nomanifest.zip');
+        const pkgDir = path.join(tempDir, pkgName);
+
+        mkdirSync(path.join(pkgDir, 'app'), { recursive: true });
+        writeFileSync(path.join(pkgDir, 'app', 'index.html'), '<html></html>');
+
+        const cwd = process.cwd();
+        process.chdir(tempDir);
+        execSync(`zip -qr "${zipPath}" "${pkgName}"`, { encoding: 'utf-8' });
+        process.chdir(cwd);
+
+        await expect(importZip(zipPath)).rejects.toThrow();
+    });
+
+    it('rejects ZIP with malformed manifest (not JSON)', async () => {
+        const tempDir = await makeTempDir();
+        const pkgName = 'fortweb-runtime';
+        const zipPath = path.join(tempDir, 'badjson.zip');
+        const pkgDir = path.join(tempDir, pkgName);
+
+        mkdirSync(pkgDir, { recursive: true });
+        writeFileSync(path.join(pkgDir, 'manifest.json'), 'not valid json {{{');
+
+        const cwd = process.cwd();
+        process.chdir(tempDir);
+        execSync(`zip -qr "${zipPath}" "${pkgName}"`, { encoding: 'utf-8' });
+        process.chdir(cwd);
+
+        await expect(importZip(zipPath)).rejects.toThrow();
+    });
+
+    it('rejects ZIP with manifest missing files array', async () => {
+        const tempDir = await makeTempDir();
+        const pkgName = 'fortweb-runtime';
+        const zipPath = path.join(tempDir, 'nofiles.zip');
+        const pkgDir = path.join(tempDir, pkgName);
+
+        mkdirSync(pkgDir, { recursive: true });
+        const manifest = {
+            schema_version: '1.0.0',
+            package_version: '0.0.0',
+            package_name: 'fortweb-runtime',
+            producer: 'fortweb',
+            payload_profile: 'offline-runtime',
+            fortweb_commit_sha: '0'.repeat(40),
+            runtime_origin: 'https://appassets.androidplatform.net',
+            entrypoint: 'app/index.html',
+            files: 'not-an-array',
+        };
+        writeFileSync(path.join(pkgDir, 'manifest.json'), JSON.stringify(manifest));
+        writeFileSync(path.join(pkgDir, 'checksums.sha256'), '0000000000000000000000000000000000000000000000000000000000000000  manifest.json\n');
+
+        const cwd = process.cwd();
+        process.chdir(tempDir);
+        execSync(`zip -qr "${zipPath}" "${pkgName}"`, { encoding: 'utf-8' });
+        process.chdir(cwd);
+
+        await expect(importZip(zipPath)).rejects.toThrow(/files is not an array/);
+    });
+});
