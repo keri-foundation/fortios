@@ -14,11 +14,17 @@
  *   - package_name:   fortweb-runtime
  *   - producer:       fortweb
  *   - payload_profile: offline-runtime
- *   - entrypoint:     app/index.html
+ *   - entrypoint:     app/index.html   (package-root-relative: fortweb-runtime/app/index.html)
  *   - manifest:       manifest.json
  *   - checksums:      checksums.sha256
  *   - schema:         schema_version (string)
  *   - file size:      bytes
+ *
+ * Path bases:
+ *   package-root-relative: relative to fortweb-runtime/ inside the ZIP
+ *   WebPayload-root-relative: relative to WebPayload/ after copyTree flattens the root
+ *   The manifest entrypoint uses package-root-relative.
+ *   The wrapper redirect uses WebPayload-root-relative (./app/index.html).
  */
 
 import { createHash } from 'node:crypto';
@@ -33,7 +39,9 @@ import { tmpdir } from 'node:os';
 
 // --- Configuration ---
 const REPO_ROOT = path.resolve(import.meta.dirname, '..');
-const PAYLOAD_DEST = path.join(REPO_ROOT, 'WebPayload');
+const PAYLOAD_DEST = process.env.FORTWEB_IMPORT_DEST
+  ? path.resolve(process.env.FORTWEB_IMPORT_DEST)
+  : path.join(REPO_ROOT, 'WebPayload');
 const EXPECTED_PACKAGE_NAME = 'fortweb-runtime';
 const EXPECTED_PRODUCER = 'fortweb';
 const EXPECTED_PROFILE = 'offline-runtime';
@@ -373,10 +381,12 @@ async function atomicReplace(srcDir, destDir, packageName) {
   await mkdir(staging, { recursive: true });
   await copyTree(pkgSrc, staging);
 
-  // Write wrapper-owned redirect index.html outside the package subtree
+  // Write wrapper-owned redirect index.html outside the package subtree.
+  // copyTree flattens the package root (fortweb-runtime/) into staging/,
+  // so the canonical entrypoint app/index.html lives at staging/app/index.html.
   const redirectHtml = `<!DOCTYPE html>
-<html><head><meta http-equiv="refresh" content="0;url=./${packageName}/app/index.html"></head>
-<body><a href="./${packageName}/app/index.html">Launch FortWeb</a></body></html>\n`;
+<html><head><meta http-equiv="refresh" content="0;url=./app/index.html"></head>
+<body><a href="./app/index.html">Launch FortWeb</a></body></html>\n`;
   await writeFile(path.join(staging, 'index.html'), redirectHtml);
 
   // Atomic swap: remove old dest, rename staging
