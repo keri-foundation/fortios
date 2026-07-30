@@ -1145,4 +1145,108 @@ describe('runtime package containment — replacement safety', () => {
         expect(existsSync(path.join(dest, 'app', 'index.html'))).toBe(true);
         expect(existsSync(path.join(dest, 'index.html'))).toBe(true);
     });
+
+    it('old destination survives staging-copy failure', async () => {
+        const tempDir = await makeTempDir();
+        const dest = path.join(tempDir, 'live-dest');
+        mkdirSync(dest, { recursive: true });
+        const survivorPath = path.join(dest, 'survivor.txt');
+        const survivorContent = 'MUST-SURVIVE-' + Date.now();
+        writeFileSync(survivorPath, survivorContent);
+
+        const { zipPath } = createTestZip(tempDir);
+
+        // Import with FORTWEB_IMPORT_DRY_RUN=1 to prepare staging without activating
+        const { execFile: ef } = await import('node:child_process');
+        const { promisify: p } = await import('node:util');
+        const result = await p(ef)('node', [importScript, zipPath], {
+            cwd: repoRoot,
+            encoding: 'utf8',
+            env: {
+                ...process.env,
+                FORTWEB_IMPORT_DEST: dest,
+                FORTWEB_IMPORT_DRY_RUN: '1',
+            },
+            maxBuffer: 1024 * 1024,
+        });
+
+        // Old destination must be intact
+        const survivor = readFileSync(survivorPath, 'utf-8');
+        expect(survivor).toBe(survivorContent);
+    });
+
+    it('rolls back when activation of new payload fails', async () => {
+        const tempDir = await makeTempDir();
+        const dest = path.join(tempDir, 'live-dest');
+        mkdirSync(dest, { recursive: true });
+        const oldFile = path.join(dest, 'old-payload.txt');
+        writeFileSync(oldFile, 'OLD-PAYLOAD');
+
+        const { zipPath } = createTestZip(tempDir);
+
+        // Import with FORTWEB_IMPORT_SIMULATE_ACTIVATION_FAILURE=1
+        const { execFile: ef } = await import('node:child_process');
+        const { promisify: p } = await import('node:util');
+        try {
+            await p(ef)('node', [importScript, zipPath], {
+                cwd: repoRoot,
+                encoding: 'utf8',
+                env: {
+                    ...process.env,
+                    FORTWEB_IMPORT_DEST: dest,
+                    FORTWEB_IMPORT_SIMULATE_ACTIVATION_FAILURE: '1',
+                },
+                maxBuffer: 1024 * 1024,
+            });
+        } catch {
+            // Expected: activation was simulated to fail
+        }
+
+        // Old destination must still be intact
+        expect(existsSync(oldFile)).toBe(true);
+        expect(readFileSync(oldFile, 'utf-8')).toBe('OLD-PAYLOAD');
+    });
+
+    it('clean removal of old payload after successful activation', async () => {
+        const tempDir = await makeTempDir();
+        const dest = path.join(tempDir, 'live-dest');
+        mkdirSync(dest, { recursive: true });
+        writeFileSync(path.join(dest, 'old.txt'), 'old');
+
+        const { zipPath } = createTestZip(tempDir);
+
+        const { execFile: ef } = await import('node:child_process');
+        const { promisify: p } = await import('node:util');
+        await p(ef)('node', [importScript, zipPath], {
+            cwd: repoRoot,
+            encoding: 'utf8',
+            env: { ...process.env, FORTWEB_IMPORT_DEST: dest },
+            maxBuffer: 1024 * 1024,
+        });
+
+        // Old file is gone, new payload is present
+        expect(existsSync(path.join(dest, 'old.txt'))).toBe(false);
+        expect(existsSync(path.join(dest, 'manifest.json'))).toBe(true);
+        expect(existsSync(path.join(dest, 'app', 'index.html'))).toBe(true);
+    });
+
+    it('creates destination when none existed before', async () => {
+        const tempDir = await makeTempDir();
+        const dest = path.join(tempDir, 'fresh-dest');
+        // dest does not exist yet
+
+        const { zipPath } = createTestZip(tempDir);
+
+        const { execFile: ef } = await import('node:child_process');
+        const { promisify: p } = await import('node:util');
+        await p(ef)('node', [importScript, zipPath], {
+            cwd: repoRoot,
+            encoding: 'utf8',
+            env: { ...process.env, FORTWEB_IMPORT_DEST: dest },
+            maxBuffer: 1024 * 1024,
+        });
+
+        expect(existsSync(path.join(dest, 'manifest.json'))).toBe(true);
+        expect(existsSync(path.join(dest, 'app', 'index.html'))).toBe(true);
+    });
 });

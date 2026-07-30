@@ -14,7 +14,8 @@
     "test:e2e": "playwright test",
     "knip": "knip",
     "knip:production": "knip --production",
-    "runtime:import": "node tools/import-fortweb-runtime-package.mjs"
+    "runtime:import": "node tools/import-fortweb-runtime-package.mjs",
+    "test:runtime-package-interop": "node tools/runtime-package-interop.mjs"
   },
   "engines": {
     "node": "22.12.0"

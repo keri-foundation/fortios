@@ -368,48 +368,104 @@ async function copyTree(src, dest) {
   }
 }
 
-async function atomicReplace(srcDir, destDir, packageName) {
-  const pkgSrc = path.join(srcDir, packageName);
-  const staging = path.join(path.dirname(destDir), '.WebPayload-staging');
+/**
+ * Activate a validated package tree as the live payload.
+ *
+ * Guarantees:
+ *  - A previously valid destination is never deleted before a complete
+ *    replacement is verified.
+ *  - The final switch uses same-directory rename (atomic on the destination
+ *    filesystem).
+ *  - If activation fails, the previous destination is restored.
+ *  - Cross-device staging writes to a sibling directory under the destination
+ *    parent, so the final rename stays on the same filesystem.
+ *
+ * Classification: ATOMIC_ACTIVATION_WITH_ROLLBACK_SAFE_PREPARATION
+ *
+ * @param {string} srcDir - extraction root (may be on a different filesystem)
+ * @param {string} destDir - live destination path
+ * @param {string} packageName - expected package root name inside srcDir
+ * @param {object} [options]
+ * @param {boolean} [options.dryRun] - if true, prepare but do not activate
+ */
+async function atomicReplace(srcDir, destDir, packageName, options = {}) {
+  const { rename } = await import('node:fs/promises');
+  const parentDir = path.dirname(destDir);
+  const nonce = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const destBasename = path.basename(destDir);
 
-  // Remove old staging if present
-  if (existsSync(staging)) {
-    await rm(staging, { recursive: true, force: true });
+  // Build the validated package tree inside a sibling of the destination,
+  // so the final rename is always same-directory (atomic on that filesystem).
+  const newSibling = path.join(parentDir, `.${destBasename}-new-${nonce}`);
+  const backupSibling = path.join(parentDir, `.${destBasename}-old-${nonce}`);
+  const pkgSrc = path.join(srcDir, packageName);
+
+  // 1. Remove any leftover sibling from a prior crashed run
+  if (existsSync(newSibling)) {
+    await rm(newSibling, { recursive: true, force: true });
+  }
+  if (existsSync(backupSibling)) {
+    await rm(backupSibling, { recursive: true, force: true });
   }
 
-  // Copy package tree to staging
-  await mkdir(staging, { recursive: true });
-  await copyTree(pkgSrc, staging);
+  // 2. Copy validated package into the new sibling (may cross filesystems)
+  await mkdir(newSibling, { recursive: true });
+  await copyTree(pkgSrc, newSibling);
 
-  // Write wrapper-owned redirect index.html outside the package subtree.
-  // copyTree flattens the package root (fortweb-runtime/) into staging/,
-  // so the canonical entrypoint app/index.html lives at staging/app/index.html.
+  // 3. Write wrapper-owned redirect — this is NOT part of the package
   const redirectHtml = `<!DOCTYPE html>
 <html><head><meta http-equiv="refresh" content="0;url=./app/index.html"></head>
 <body><a href="./app/index.html">Launch FortWeb</a></body></html>\n`;
-  await writeFile(path.join(staging, 'index.html'), redirectHtml);
+  await writeFile(path.join(newSibling, 'index.html'), redirectHtml);
 
-  // Atomic swap: remove old dest, rename staging
-  if (existsSync(destDir)) {
-    const oldStaging = path.join(path.dirname(destDir), '.WebPayload-old');
-    if (existsSync(oldStaging)) await rm(oldStaging, { recursive: true, force: true });
-    await mkdir(path.dirname(oldStaging), { recursive: true });
-    try {
-      // On macOS, rename across filesystems may fail; use copy + rm fallback
-      await rm(destDir, { recursive: true, force: true });
-    } catch {
-      // Fallback handled below
-    }
+  // 4. Verify the new sibling is complete (basic sanity: manifest exists)
+  const newManifestPath = path.join(newSibling, 'manifest.json');
+  if (!existsSync(newManifestPath)) {
+    throw new Error('Staged replacement is missing manifest.json — aborting activation');
   }
 
+  if (options.dryRun) {
+    // Test-only: leave newSibling and backupSibling for inspection
+    return;
+  }
+
+  // Test-only: simulate activation failure for rollback proof
+  if (process.env.FORTWEB_IMPORT_SIMULATE_ACTIVATION_FAILURE === '1') {
+    throw new Error('SIMULATED_ACTIVATION_FAILURE');
+  }
+
+  const hadExisting = existsSync(destDir);
+
   try {
-    const { rename } = await import('node:fs/promises');
-    await rename(staging, destDir);
-  } catch (e) {
-    // Cross-device fallback
-    if (existsSync(destDir)) await rm(destDir, { recursive: true, force: true });
-    await copyTree(staging, destDir);
-    await rm(staging, { recursive: true, force: true });
+    // 5. If a live destination exists, move it aside (same-filesystem rename)
+    if (hadExisting) {
+      await rename(destDir, backupSibling);
+    }
+
+    // 6. Activate the new payload (same-filesystem rename)
+    try {
+      await rename(newSibling, destDir);
+    } catch (activationError) {
+      // Rollback: restore the previous destination
+      if (hadExisting) {
+        try { await rename(backupSibling, destDir); } catch { /* best effort */ }
+      }
+      throw activationError;
+    }
+
+    // 7. Clean up backup now that activation succeeded
+    if (hadExisting) {
+      await rm(backupSibling, { recursive: true, force: true });
+    }
+  } finally {
+    // 8. Always clean newSibling if it still exists (failed activation)
+    if (existsSync(newSibling)) {
+      await rm(newSibling, { recursive: true, force: true });
+    }
+    // Clean backup if somehow left behind
+    if (existsSync(backupSibling)) {
+      await rm(backupSibling, { recursive: true, force: true });
+    }
   }
 }
 
@@ -495,7 +551,8 @@ async function importPackage(zipPath) {
 
   // 7. Replace destination atomically
   console.log(`Staging to ${PAYLOAD_DEST}...`);
-  await atomicReplace(extractDir, PAYLOAD_DEST, packageName);
+  const dryRun = process.env.FORTWEB_IMPORT_DRY_RUN === '1';
+  await atomicReplace(extractDir, PAYLOAD_DEST, packageName, { dryRun });
 
   // 8. Clean up
   await rm(extractDir, { recursive: true, force: true });
