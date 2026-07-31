@@ -1,0 +1,10 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "copilot-fortios-validate-swift-ci-smoke",
+			"type": "shell",
+			"command": "bash scripts/run-swift-tests-ci.sh bootstrap && bash scripts/run-swift-tests-ci.sh build-for-testing && bash scripts/run-swift-tests-ci.sh test-without-building"
+		}
+	]
+}

@@ -81,12 +81,11 @@ struct BridgeMessageProvenance: Equatable {
     let isMainFrame: Bool
     let scheme: String
     let host: String
-    let port: Int32
+    let port: Int
 
     /// Extract provenance from a WKScriptMessage's frame information.
-    /// Returns nil only if the message has no frameInfo (should not occur in practice).
-    init?(from message: WKScriptMessage) {
-        guard let frameInfo = message.frameInfo else { return nil }
+    init(from message: WKScriptMessage) {
+        let frameInfo = message.frameInfo
         self.isMainFrame = frameInfo.isMainFrame
         // WebKit normalizes these to lowercase per RFC 3986.
         self.scheme = frameInfo.securityOrigin.protocol
@@ -100,7 +99,7 @@ struct BridgeMessageProvenance: Equatable {
         case missingFrameInfo
         case unexpectedScheme(String)
         case unexpectedHost(String)
-        case unexpectedPort(Int32)
+        case unexpectedPort(Int)
         case untrustedOrigin
     }
 
@@ -261,12 +260,7 @@ final class WebBridge: NSObject, WKScriptMessageHandler {
 
         // 2. Validate message provenance — main frame + trusted origin only.
         //    Must reject before body decoding to avoid processing untrusted payloads.
-        guard let provenance = BridgeMessageProvenance(from: message) else {
-            AppLogger.error(
-                "[WebBridge] rejected: missing frame info",
-                category: AppConfig.Log.webBridge)
-            return
-        }
+        let provenance = BridgeMessageProvenance(from: message)
 
         switch provenance.validate() {
         case .allow:

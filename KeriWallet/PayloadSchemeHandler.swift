@@ -140,7 +140,7 @@ final class PayloadSchemeHandler: NSObject, WKURLSchemeHandler {
             return
         }
 
-        let manifestURL = baseURL.appendingPathComponent("build-manifest.json", isDirectory: false)
+        let manifestURL = baseURL.appendingPathComponent("manifest.json", isDirectory: false)
 
         guard fileManager.fileExists(atPath: manifestURL.path) else {
             throw PayloadSchemeError.invalidPayloadManifest
@@ -151,10 +151,10 @@ final class PayloadSchemeHandler: NSObject, WKURLSchemeHandler {
             let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
             let producer = json["producer"] as? String,
             let payloadProfile = json["payload_profile"] as? String,
-            let entryDocument = json["entry_document"] as? String,
+            let entrypoint = json["entrypoint"] as? String,
             producer == AppConfig.Payload.requiredProducer,
             payloadProfile == AppConfig.Payload.requiredProfile,
-            entryDocument == AppConfig.Payload.requiredEntryDocument
+            entrypoint == AppConfig.Payload.requiredEntryDocument
         else {
             throw PayloadSchemeError.invalidPayloadManifest
         }

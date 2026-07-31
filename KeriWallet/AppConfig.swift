@@ -57,7 +57,7 @@ enum AppConfig {
             /// No port is expected; port 0 is treated as absent.
             case prohibited
             /// A specific port is required; port 0 is treated as absent.
-            case fixed(Int32)
+            case fixed(Int)
             /// Any port is accepted; only scheme + host are validated.
             case unrestricted
         }
@@ -69,9 +69,9 @@ enum AppConfig {
         /// Bundle subdirectory containing the Vite `dist/` output (synced by `sync-payload.sh`).
         static let bundleSubdirectory = "WebPayload"
         /// Wrapper payload provenance expected by the native host.
-        static let requiredProducer = "fortweb-shared"
-        static let requiredProfile = "product-shell"
-        static let requiredEntryDocument = "fortweb/app/index.html"
+        static let requiredProducer = "fortweb"
+        static let requiredProfile = "offline-runtime"
+        static let requiredEntryDocument = "app/index.html"
         /// Maximum size (in bytes) of any single resource served by the scheme handler.
         /// 20 MiB — generous ceiling; Pyodide `.wasm` is ~12 MiB.
         static let maxResourceBytes = 20 * 1024 * 1024

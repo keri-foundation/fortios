@@ -19,38 +19,62 @@ final class WebContainerViewController: UIViewController {
         self.bridge = bridge
 
         // Inject runtime-origin contract before any document loads.
-        // This must run at document start so main.js can read it during bootstrap.
-        // Use url(forResource:withExtension:subdirectory:) which supports
-        // nested subdirectory paths; path(forResource:ofType:inDirectory:)
-        // only accepts a single top-level directory name.
-        guard let contractURL = Bundle.main.url(
-            forResource: "runtime-origin-contract",
-            withExtension: "json",
-            subdirectory: "WebPayload/fortweb/app"
-        ) else {
-            fatalError("[WebContainer] runtime-origin-contract.json not found in bundle. Run 'make sync' to regenerate WebPayload.")
-        }
-
-        let contractData: Data
-        do {
-            contractData = try Data(contentsOf: contractURL)
-        } catch {
-            fatalError("[WebContainer] Failed to read runtime-origin-contract.json: \(error.localizedDescription)")
-        }
-
-        guard let contractString = String(data: contractData, encoding: .utf8) else {
-            fatalError("[WebContainer] runtime-origin-contract.json is not valid UTF-8.")
-        }
-
-        let scriptSource = """
-            window.__FORT_RUNTIME_ORIGIN__ = \(contractString);
+        // Canonical trusted origin is app://local (AppConfig.Scheme).
+        // Hardcoded because the origin is stable — no file-based fallback needed.
+        let contractSource = """
+            {
+              "schema": "fortweb.runtime-origin.v1",
+              "version": 1,
+              "platform": "ios-wkwebview",
+              "mode": "bundled-offline",
+              "documentOrigin": "app://local",
+              "appBaseUrl": "app://local",
+              "entryUrl": "app://local/app/index.html",
+              "workerUrl": "app://local/app/runtime/wallet-worker.py",
+              "configUrl": "app://local/pyscript-ci.toml",
+              "storage": {
+                "storageNamespace": "keri-wallet-ios",
+                "indexedDbRequired": true,
+                "originPartition": "app://local/"
+              },
+              "capabilities": {
+                "customScheme": true,
+                "httpsLikeAssetOrigin": false,
+                "implicitBlobOriginSafe": false,
+                "networkAllowed": false,
+                "bundledAssetsOnly": true
+              }
+            }
             """
         let script = WKUserScript(
-            source: scriptSource,
+            source: "window.__FORT_RUNTIME_ORIGIN__ = \(contractSource);",
             injectionTime: .atDocumentStart,
             forMainFrameOnly: true
         )
         userContentController.addUserScript(script)
+
+        // Capture JS console errors and unhandled exceptions.
+        // Each error becomes a single clean native log line — no Safari needed.
+        let errorCaptureScript = WKUserScript(
+            source: """
+                (function() {
+                    const bridge = window.webkit?.messageHandlers?.bridge;
+                    if (!bridge) return;
+                    const post = (type, msg) => {
+                        try { bridge.postMessage({type: type, timestamp: new Date().toISOString(), message: String(msg).slice(0, 500)}); } catch(_) {}
+                    };
+                    const origError = console.error.bind(console);
+                    const origWarn = console.warn.bind(console);
+                    console.error = function() { origError.apply(console, arguments); post('js_error', Array.from(arguments).join(' ')); };
+                    console.warn = function() { origWarn.apply(console, arguments); post('log', Array.from(arguments).join(' ')); };
+                    window.addEventListener('error', function(e) { post('js_error', e.message + ' at ' + e.filename + ':' + e.lineno); });
+                    window.addEventListener('unhandledrejection', function(e) { post('js_error', 'Unhandled rejection: ' + (e.reason?.message || e.reason)); });
+                })();
+                """,
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: true
+        )
+        userContentController.addUserScript(errorCaptureScript)
 
         // Receive crypto operation results from Pyodide worker via JS bridge
         bridge.onCryptoResult = { [weak self] payload in
