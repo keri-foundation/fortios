@@ -258,3 +258,203 @@ struct CryptoResultPayloadTests {
         }
     }
 }
+
+// MARK: - Bridge provenance validation
+
+@Suite("BridgeMessageProvenance validation")
+struct BridgeMessageProvenanceTests {
+
+    // MARK: Accepted
+
+    @Test("allows main-frame message from trusted origin with no port")
+    func allowsTrustedMainFrameNoPort() {
+        let provenance = BridgeMessageProvenance(
+            isMainFrame: true,
+            scheme: AppConfig.Bridge.TrustedOrigin.scheme,
+            host: AppConfig.Bridge.TrustedOrigin.host,
+            port: 0  // WKWebView sentinel for "no port"
+        )
+        #expect(provenance.validate() == .allow)
+    }
+
+    @Test("allows main-frame message from trusted origin with port 0")
+    func allowsTrustedMainFramePortZero() {
+        let provenance = BridgeMessageProvenance(
+            isMainFrame: true,
+            scheme: "app",
+            host: "local",
+            port: 0
+        )
+        #expect(provenance.validate() == .allow)
+    }
+
+    // MARK: Frame rejection
+
+    @Test("rejects subframe message even with trusted origin")
+    func rejectsSubframeTrustedOrigin() {
+        let provenance = BridgeMessageProvenance(
+            isMainFrame: false,
+            scheme: "app",
+            host: "local",
+            port: 0
+        )
+        #expect(provenance.validate() == .reject(.subframe))
+    }
+
+    @Test("rejects subframe message with untrusted origin")
+    func rejectsSubframeUntrustedOrigin() {
+        let provenance = BridgeMessageProvenance(
+            isMainFrame: false,
+            scheme: "https",
+            host: "evil.example",
+            port: 443
+        )
+        #expect(provenance.validate() == .reject(.subframe))
+    }
+
+    // MARK: Scheme rejection
+
+    @Test("rejects HTTPS scheme")
+    func rejectsHttpsScheme() {
+        let provenance = BridgeMessageProvenance(
+            isMainFrame: true,
+            scheme: "https",
+            host: "local",
+            port: 443
+        )
+        guard case .reject(.unexpectedScheme(let s)) = provenance.validate() else {
+            #expect(Bool(false), "expected unexpectedScheme rejection")
+            return
+        }
+        #expect(s == "https")
+    }
+
+    @Test("rejects HTTP scheme")
+    func rejectsHttpScheme() {
+        let provenance = BridgeMessageProvenance(
+            isMainFrame: true,
+            scheme: "http",
+            host: "local",
+            port: 80
+        )
+        guard case .reject(.unexpectedScheme(_)) = provenance.validate() else {
+            #expect(Bool(false), "expected rejection")
+            return
+        }
+    }
+
+    @Test("rejects file scheme")
+    func rejectsFileScheme() {
+        let provenance = BridgeMessageProvenance(
+            isMainFrame: true,
+            scheme: "file",
+            host: "",
+            port: 0
+        )
+        guard case .reject(.unexpectedScheme(_)) = provenance.validate() else {
+            #expect(Bool(false), "expected rejection")
+            return
+        }
+    }
+
+    // MARK: Host rejection
+
+    @Test("rejects wrong host")
+    func rejectsWrongHost() {
+        let provenance = BridgeMessageProvenance(
+            isMainFrame: true,
+            scheme: "app",
+            host: "evil",
+            port: 0
+        )
+        guard case .reject(.unexpectedHost(let h)) = provenance.validate() else {
+            #expect(Bool(false), "expected unexpectedHost rejection")
+            return
+        }
+        #expect(h == "evil")
+    }
+
+    @Test("rejects subdomain-style host")
+    func rejectsSubdomainHost() {
+        let provenance = BridgeMessageProvenance(
+            isMainFrame: true,
+            scheme: "app",
+            host: "sub.local",
+            port: 0
+        )
+        guard case .reject(.unexpectedHost(_)) = provenance.validate() else {
+            #expect(Bool(false), "expected rejection")
+            return
+        }
+    }
+
+    @Test("rejects suffix-confusion host")
+    func rejectsSuffixConfusionHost() {
+        let provenance = BridgeMessageProvenance(
+            isMainFrame: true,
+            scheme: "app",
+            host: "local.evil",
+            port: 0
+        )
+        guard case .reject(.unexpectedHost(_)) = provenance.validate() else {
+            #expect(Bool(false), "expected rejection")
+            return
+        }
+    }
+
+    @Test("rejects empty host")
+    func rejectsEmptyHost() {
+        let provenance = BridgeMessageProvenance(
+            isMainFrame: true,
+            scheme: "app",
+            host: "",
+            port: 0
+        )
+        guard case .reject(.unexpectedHost(_)) = provenance.validate() else {
+            #expect(Bool(false), "expected rejection")
+            return
+        }
+    }
+
+    // MARK: Port rejection
+
+    @Test("rejects explicit port when port is prohibited")
+    func rejectsExplicitPort() {
+        let provenance = BridgeMessageProvenance(
+            isMainFrame: true,
+            scheme: "app",
+            host: "local",
+            port: 8080
+        )
+        guard case .reject(.unexpectedPort(let p)) = provenance.validate() else {
+            #expect(Bool(false), "expected unexpectedPort rejection")
+            return
+        }
+        #expect(p == 8080)
+    }
+
+    // MARK: Equatable
+
+    @Test("provenance is equatable")
+    func provenanceIsEquatable() {
+        let a = BridgeMessageProvenance(isMainFrame: true, scheme: "app", host: "local", port: 0)
+        let b = BridgeMessageProvenance(isMainFrame: true, scheme: "app", host: "local", port: 0)
+        #expect(a == b)
+    }
+
+    @Test("rejection reasons are equatable")
+    func rejectionReasonsEquatable() {
+        #expect(BridgeMessageProvenance.RejectionReason.subframe == .subframe)
+        #expect(BridgeMessageProvenance.RejectionReason.unexpectedScheme("x") == .unexpectedScheme("x"))
+        #expect(BridgeMessageProvenance.RejectionReason.unexpectedScheme("x") != .unexpectedScheme("y"))
+    }
+
+    // MARK: Trusted origin config
+
+    @Test("trusted origin config matches expected values")
+    func trustedOriginConfig() {
+        #expect(AppConfig.Bridge.TrustedOrigin.scheme == "app")
+        #expect(AppConfig.Bridge.TrustedOrigin.host == "local")
+        #expect(AppConfig.Bridge.TrustedOrigin.portRule == .prohibited)
+    }
+}

@@ -73,6 +73,79 @@ struct FortWebRuntimeDiagnostic: Equatable {
     }
 }
 
+// MARK: - Bridge Message Provenance
+
+/// Immutable snapshot of the WebKit frame that posted a bridge message.
+/// Used to reject messages from untrusted contexts before dispatching.
+struct BridgeMessageProvenance: Equatable {
+    let isMainFrame: Bool
+    let scheme: String
+    let host: String
+    let port: Int32
+
+    /// Extract provenance from a WKScriptMessage's frame information.
+    /// Returns nil only if the message has no frameInfo (should not occur in practice).
+    init?(from message: WKScriptMessage) {
+        guard let frameInfo = message.frameInfo else { return nil }
+        self.isMainFrame = frameInfo.isMainFrame
+        // WebKit normalizes these to lowercase per RFC 3986.
+        self.scheme = frameInfo.securityOrigin.protocol
+        self.host = frameInfo.securityOrigin.host
+        self.port = frameInfo.securityOrigin.port
+    }
+
+    /// Reject reasons — bounded structured diagnostics. Never include message bodies.
+    enum RejectionReason: Equatable {
+        case subframe
+        case missingFrameInfo
+        case unexpectedScheme(String)
+        case unexpectedHost(String)
+        case unexpectedPort(Int32)
+        case untrustedOrigin
+    }
+
+    /// Decision after provenance validation.
+    enum Decision: Equatable {
+        case allow
+        case reject(RejectionReason)
+    }
+
+    /// Validate against the canonical trusted origin defined in AppConfig.
+    func validate() -> Decision {
+        if !isMainFrame {
+            return .reject(.subframe)
+        }
+
+        let trusted = AppConfig.Bridge.TrustedOrigin.self
+
+        if scheme != trusted.scheme {
+            return .reject(.unexpectedScheme(scheme))
+        }
+
+        if host != trusted.host {
+            return .reject(.unexpectedHost(host))
+        }
+
+        switch trusted.portRule {
+        case .prohibited:
+            // Port 0 is WKWebView's sentinel for "no port"; treat as absent.
+            if port != 0 {
+                return .reject(.unexpectedPort(port))
+            }
+        case .fixed(let expected):
+            if port != 0 && port != expected {
+                return .reject(.unexpectedPort(port))
+            }
+        case .unrestricted:
+            break
+        }
+
+        return .allow
+    }
+}
+
+// MARK: - Bridge Implementation
+
 final class WebBridge: NSObject, WKScriptMessageHandler {
     /// Called on the main thread whenever a `crypto_result` message arrives from JS.
     /// Set this before the WebView loads its first URL.
@@ -179,12 +252,31 @@ final class WebBridge: NSObject, WKScriptMessageHandler {
     func userContentController(
         _ userContentController: WKUserContentController, didReceive message: WKScriptMessage
     ) {
+        // 1. Validate handler name
         guard message.name == AppConfig.Bridge.handlerName else {
             AppLogger.error(
                 "[WebBridge] unexpected handler name: \(message.name)", category: AppConfig.Log.webBridge)
             return
         }
 
+        // 2. Validate message provenance — main frame + trusted origin only.
+        //    Must reject before body decoding to avoid processing untrusted payloads.
+        guard let provenance = BridgeMessageProvenance(from: message) else {
+            AppLogger.error(
+                "[WebBridge] rejected: missing frame info",
+                category: AppConfig.Log.webBridge)
+            return
+        }
+
+        switch provenance.validate() {
+        case .allow:
+            break
+        case .reject(let reason):
+            logProvenanceRejection(reason, provenance: provenance)
+            return
+        }
+
+        // 3. Decode and dispatch
         guard let envelope = decodeEnvelope(body: message.body) else {
             AppLogger.warning("[WebBridge] ignored malformed message", category: AppConfig.Log.webBridge)
             return
@@ -213,6 +305,39 @@ final class WebBridge: NSObject, WKScriptMessageHandler {
                     "[WebBridge] crypto_result (no callback registered)", category: AppConfig.Log.webBridge)
             }
         }
+    }
+
+    /// Log a provenance rejection with bounded structured diagnostics.
+    /// Never includes message bodies, credentials, or user data.
+    private func logProvenanceRejection(
+        _ reason: BridgeMessageProvenance.RejectionReason,
+        provenance: BridgeMessageProvenance
+    ) {
+        let reasonString: String
+        switch reason {
+        case .subframe:
+            reasonString = "subframe"
+        case .missingFrameInfo:
+            reasonString = "missing_frame_info"
+        case .unexpectedScheme(let scheme):
+            reasonString = "unexpected_scheme(\(scheme))"
+        case .unexpectedHost(let host):
+            reasonString = "unexpected_host(\(host))"
+        case .unexpectedPort(let port):
+            reasonString = "unexpected_port(\(port))"
+        case .untrustedOrigin:
+            reasonString = "untrusted_origin"
+        }
+
+        AppLogger.warning(
+            "[WebBridge] rejected bridge message: reason=\(reasonString)"
+            + " isMainFrame=\(provenance.isMainFrame)"
+            + " scheme=\(provenance.scheme)"
+            + " host=\(provenance.host)"
+            + " port=\(provenance.port)"
+            + " expectedScheme=\(AppConfig.Bridge.TrustedOrigin.scheme)"
+            + " expectedHost=\(AppConfig.Bridge.TrustedOrigin.host)",
+            category: AppConfig.Log.webBridge)
     }
 
     private func decodeEnvelope(body: Any) -> WebBridgeEnvelope? {

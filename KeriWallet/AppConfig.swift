@@ -37,6 +37,30 @@ enum AppConfig {
         /// WKScriptMessageHandler name — must match JS: `webkit.messageHandlers.bridge`.
         /// Delegates to the auto-generated `BridgeContract` for cross-language safety.
         static let handlerName = BridgeContract.handlerName
+
+        // MARK: Trusted Origin
+
+        /// The only security origin from which bridge messages are accepted.
+        /// Messages from subframes or unexpected origins are rejected before decoding.
+        enum TrustedOrigin {
+            /// Expected scheme. Must match the custom URL scheme registered with WKWebView.
+            static let scheme = "app"
+            /// Expected host. Must match the host in the initial entry URL.
+            static let host = "local"
+            /// Port policy: no port is expected. Port 0 (WKWebView's "no port" sentinel)
+            /// is treated as absent. Explicit ports are rejected.
+            static let portRule: PortRule = .prohibited
+        }
+
+        /// Port policy for security origin validation.
+        enum PortRule: Equatable {
+            /// No port is expected; port 0 is treated as absent.
+            case prohibited
+            /// A specific port is required; port 0 is treated as absent.
+            case fixed(Int32)
+            /// Any port is accepted; only scheme + host are validated.
+            case unrestricted
+        }
     }
 
     // MARK: - Bundled Web Payload
