@@ -241,7 +241,7 @@ test-swift: ## Run Swift unit + UI tests on iOS Simulator
 	  echo "ERROR: Could not resolve a simulator."; \
 	  exit 1; \
 	fi
-	xcodebuild test \
+	FORTWEB_DIR="$(FORTWEB_DIR)" xcodebuild test \
 	  -project $(XCODE_PROJECT) \
 	  -scheme $(SCHEME) \
 	  -configuration Debug \
