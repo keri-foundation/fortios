@@ -15,7 +15,11 @@
     "knip": "knip",
     "knip:production": "knip --production",
     "runtime:import": "node tools/import-fortweb-runtime-package.mjs",
-    "test:runtime-package-interop": "node tools/runtime-package-interop.mjs"
+    "test:runtime-package-interop": "node tools/runtime-package-interop.mjs",
+    "check:containment": "node tools/assert-payload-containment.mjs",
+    "check:integrity": "node tools/assert-payload-integrity.mjs",
+    "check:pyodide": "node tools/assert-pyodide-runtime.mjs",
+    "check:payload": "npm run check:containment && npm run check:integrity && npm run check:pyodide"
   },
   "engines": {
     "node": "22.12.0"

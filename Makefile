@@ -78,6 +78,9 @@ payload-contract: ## Fail closed on blocked payload regressions and validate sta
 	node tools/assert-no-proof-demo-shell.mjs
 	PAYLOAD_SOURCE=fortweb FORTWEB_DIR=$(FORTWEB_DIR) ./sync-payload.sh
 	node tools/validate-mobile-payload.mjs --payload-dir WebPayload --target ios-webpayload
+	node tools/assert-payload-integrity.mjs --payload-dir WebPayload
+	node tools/assert-pyodide-runtime.mjs --payload-dir WebPayload
+	node tools/assert-payload-containment.mjs
 
 check-contract: ## Verify runtime-origin-contract.json exists and is valid JSON
 	@if [ ! -f WebPayload/fortweb/app/runtime-origin-contract.json ]; then \
