@@ -117,27 +117,49 @@ function listZipEntries(zipPath) {
 }
 
 function parseUnzipList(output) {
-  // macOS unzip -l format:
-  //   Length      Date    Time    Name
+  // Parse `unzip -l` output without depending on date format.
+  //
+  // Column layout (macOS MM-DD-YYYY, Ubuntu YYYY-MM-DD, any locale):
+  //     Length      Date    Time    Name
   //   --------  ---------- -----   ----
   //       1234  01-01-2026 00:00   path/to/file
-  //   --------                     -------
-  //    12345678                     100 files
+  //       1234  2026-01-01 00:00   path/to/file
+  //
+  // Strategy: anchor on the time column (HH:MM) which is stable across
+  // platforms.  Split each line at the time, take the first number from
+  // the left side as the byte length, and everything after the time as
+  // the filename.
+
+  const TIME_RE = /\b(\d{2}:\d{2})\b/;
+
   const entries = [];
   const lines = output.split('\n');
   let inEntries = false;
+
   for (const line of lines) {
     if (line.startsWith(' --------') || line.startsWith('---------')) {
       inEntries = !inEntries;
       continue;
     }
     if (!inEntries) continue;
-    // Match: leading spaces, length (digits), spaces, date (dd-mm-yyyy), spaces, time (hh:mm), spaces, name
-    const m = line.match(/^\s*(\d+)\s+\d{2}-\d{2}-\d{4}\s+\d{2}:\d{2}\s+(.+)$/);
-    if (m) {
-      entries.push({ length: parseInt(m[1], 10), name: m[2].trim() });
-    }
+
+    const timeMatch = line.match(TIME_RE);
+    if (!timeMatch) continue; // summary / footer line, no time column
+
+    const timeIdx = timeMatch.index;
+    const beforeTime = line.slice(0, timeIdx);
+    const afterTime = line.slice(timeIdx + timeMatch[0].length);
+
+    // First run of digits in the left portion is the byte length
+    const sizeMatch = beforeTime.match(/(\d+)/);
+    if (!sizeMatch) continue;
+
+    const name = afterTime.trim();
+    if (!name) continue;
+
+    entries.push({ length: parseInt(sizeMatch[1], 10), name });
   }
+
   return entries;
 }
 
