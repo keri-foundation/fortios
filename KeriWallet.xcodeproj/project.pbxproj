@@ -267,7 +267,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/bash;
-			shellScript = "cd \"${SRCROOT}\"\nif [ -f WebPayload/app/index.html ]; then\n  echo \"WebPayload/ is present — skipping sync.\"\nelse\n  echo \"WebPayload/ is missing — run make sync or make xcode-ready.\"\n  exit 1\nfi\n";
+			shellScript = "cd \"${SRCROOT}\"\nif [ -f WebPayload/fortweb/app/index.html ]; then\n  echo \"WebPayload/ is present — skipping sync.\"\nelse\n  echo \"WebPayload/ is missing — run make sync or make xcode-ready.\"\n  exit 1\nfi\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
