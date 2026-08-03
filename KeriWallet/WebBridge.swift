@@ -93,6 +93,14 @@ struct BridgeMessageProvenance: Equatable {
         self.port = frameInfo.securityOrigin.port
     }
 
+    /// Direct initializer for testing and diagnostic construction.
+    init(isMainFrame: Bool, scheme: String, host: String, port: Int) {
+        self.isMainFrame = isMainFrame
+        self.scheme = scheme
+        self.host = host
+        self.port = port
+    }
+
     /// Reject reasons — bounded structured diagnostics. Never include message bodies.
     enum RejectionReason: Equatable {
         case subframe
