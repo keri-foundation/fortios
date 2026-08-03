@@ -259,15 +259,17 @@
 			files = (
 			);
 			inputPaths = (
-				"$(SRCROOT)/sync-payload.sh",
+				"$(SRCROOT)/WebPayload/manifest.json",
+				"$(SRCROOT)/WebPayload/checksums.sha256",
+				"$(SRCROOT)/WebPayload/app/index.html",
 			);
 			name = "Ensure FortWeb Payload";
 			outputPaths = (
-				"$(SRCROOT)/WebPayload/.gitkeep",
+				"$(DERIVED_FILE_DIR)/.fortweb-payload-guard-stamp",
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/bash;
-			shellScript = "cd \"${SRCROOT}\"\nif [ -f WebPayload/fortweb/app/index.html ]; then\n  echo \"WebPayload/ is present — skipping sync.\"\nelse\n  echo \"WebPayload/ is missing — run make sync or make xcode-ready.\"\n  exit 1\nfi\n";
+			shellScript = "cd \"${SRCROOT}\"\n\nmissing=0\nfor required in \\\n  WebPayload/manifest.json \\\n  WebPayload/checksums.sha256 \\\n  WebPayload/app/index.html\ndo\n  if [ ! -f \"$required\" ]; then\n    echo \"ERROR: required imported payload file is missing: $required\"\n    missing=1\n  fi\ndone\n\nif [ \"$missing\" -ne 0 ]; then\n  echo \"Run: make payload-import FORTWEB_DIR=/path/to/fortweb\"\n  exit 1\nfi\n\necho \"Verified ZIP-imported FortWeb payload.\"\nmkdir -p \"${DERIVED_FILE_DIR}\"\ntouch \"${DERIVED_FILE_DIR}/.fortweb-payload-guard-stamp\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
