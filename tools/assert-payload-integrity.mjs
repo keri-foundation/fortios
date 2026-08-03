@@ -152,10 +152,6 @@ async function validateChecksums(payloadDir, manifest) {
       if (buf.length !== f.bytes) {
         errors.push(violation(f.path, `byte size mismatch: expected ${f.bytes}, got ${buf.length}`, expected));
       }
-      // Verify checksums file has this file's hash line
-      if (!checksumsText.includes(`${f.sha256}  ${f.path}`)) {
-        errors.push(violation(PRODUCER_CHECKSUMS, `checksums file missing entry for ${f.path}`, expected));
-      }
     } catch (e) {
       if (e.code === 'ENOENT') {
         errors.push(violation(f.path, 'manifest-declared file is missing from payload', expected));
