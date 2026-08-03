@@ -14,12 +14,12 @@ private func writeFile(_ url: URL, content: String) throws -> URL {
 private func writeValidPayloadManifest(_ dir: URL) throws {
     let manifest = """
     {
-      "producer": "fortweb-shared",
-      "payload_profile": "product-shell",
-      "entry_document": "fortweb/app/index.html"
+      "producer": "fortweb",
+      "payload_profile": "offline-runtime",
+      "entrypoint": "app/index.html"
     }
     """
-    _ = try writeFile(dir.appendingPathComponent("build-manifest.json"), content: manifest)
+    _ = try writeFile(dir.appendingPathComponent("manifest.json"), content: manifest)
 }
 
 // MARK: - MIME Tests
@@ -273,10 +273,10 @@ struct PathNormalisationTests {
         {
           "producer": "fort-ios-local",
           "payload_profile": "proof-shell",
-          "entry_document": "index.html"
+          "entrypoint": "index.html"
         }
         """
-        _ = try writeFile(tmp.appendingPathComponent("build-manifest.json"), content: manifest)
+        _ = try writeFile(tmp.appendingPathComponent("manifest.json"), content: manifest)
         _ = try writeFile(tmp.appendingPathComponent("index.html"), content: "<html></html>")
 
         let handler = makeHandler(dir: tmp)
