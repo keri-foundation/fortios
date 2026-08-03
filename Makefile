@@ -35,7 +35,7 @@ DEVICE_REF    ?=
 # FortWeb-driven Xcode preparation
 XCODE_READY_TESTS ?= 1
 
-.PHONY: help setup pyodide sync sync-fortweb payload-contract check-contract ios-doctor ios-resolve-sim ios-list-sims ios-list-devices xcode-ready dev-sim run-sim dev-device run-device parity-smoke logs-sim logs-device build test-swift test-ts test-e2e test-e2e-slow test-all bridge-check lint lint-ts open clean clean-payload clean-runtime clean-all doctor generated-check knip archive export upload
+.PHONY: help setup pyodide sync sync-fortweb payload-contract check-contract ios-doctor ios-resolve-sim ios-list-sims ios-list-devices xcode-ready dev-sim run-sim dev-device run-device parity-smoke logs-sim logs-device build test-swift test-swift-build test-swift-run test-ts test-e2e test-e2e-slow test-all bridge-check lint lint-ts open clean clean-payload clean-runtime clean-all doctor generated-check knip archive export upload
 
 help: ## Show available make targets
 	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | \
@@ -236,12 +236,21 @@ build: ## Build KeriWallet for iOS Simulator (Debug)
 	  -destination '$(SIM_DESTINATION)' \
 	  -derivedDataPath $(SIM_DERIVED_DATA)
 
-test-swift: ## Run Swift unit + UI tests on iOS Simulator
+test-swift-build: ## Build Swift tests (no simulator boot required)
+	FORTWEB_DIR="$(FORTWEB_DIR)" xcodebuild build-for-testing \
+	  -project $(XCODE_PROJECT) \
+	  -scheme $(SCHEME) \
+	  -configuration Debug \
+	  -destination 'platform=iOS Simulator,name=Any iOS Simulator Device' \
+	  -derivedDataPath $(SIM_DERIVED_DATA) \
+	  build
+
+test-swift-run: ## Run pre-built Swift tests (simulator must be resolved)
 	@if [ "$(SIM_UDID)" = "SIM_UNRESOLVED" ]; then \
 	  echo "ERROR: Could not resolve a simulator."; \
 	  exit 1; \
 	fi
-	FORTWEB_DIR="$(FORTWEB_DIR)" xcodebuild test \
+	FORTWEB_DIR="$(FORTWEB_DIR)" xcodebuild test-without-building \
 	  -project $(XCODE_PROJECT) \
 	  -scheme $(SCHEME) \
 	  -configuration Debug \
@@ -249,6 +258,8 @@ test-swift: ## Run Swift unit + UI tests on iOS Simulator
 	  -resultBundlePath $(TEST_RESULTS) \
 	  -derivedDataPath $(SIM_DERIVED_DATA) \
 	  -parallel-testing-enabled NO
+
+test-swift: test-swift-build test-swift-run ## Build then run Swift unit + UI tests on iOS Simulator
 
 test-all: test-swift test-ts test-e2e ## Run Swift + TS + E2E tests
 

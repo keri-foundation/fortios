@@ -109,12 +109,14 @@ jobs:
         run: make test-e2e
 
   swift-tests:
-    runs-on: macos-15
+    runs-on: macos-26
+    timeout-minutes: 45
     env:
-      DEVELOPER_DIR: /Applications/Xcode_26.0.1.app/Contents/Developer
+      DEVELOPER_DIR: /Applications/Xcode_26.5.app/Contents/Developer
       FORTWEB_DIR: ${{ github.workspace }}/.deps/fortweb
       SIMULATOR_NAME: 'iPhone 17 Pro'
-      SIMULATOR_OS: '26.0'
+      SIMULATOR_OS: '26.5'
+      RESULT_BUNDLE_PATH: build/TestResults.xcresult
 
     steps:
       - name: Check out repository
@@ -145,5 +147,18 @@ jobs:
       - name: Enforce wrapper payload contract
         run: make payload-contract
 
-      - name: Run Swift unit and UI tests
-        run: make test-swift
+      - name: Build Swift for testing
+        timeout-minutes: 15
+        run: make test-swift-build
+
+      - name: Run Swift tests
+        timeout-minutes: 25
+        run: make test-swift-run
+
+      - name: Upload Swift test results
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@v4
+        with:
+          name: swift-test-results
+          path: ${{ env.RESULT_BUNDLE_PATH }}
+          if-no-files-found: ignore
