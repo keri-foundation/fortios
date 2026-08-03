@@ -35,7 +35,7 @@ DEVICE_REF    ?=
 # FortWeb-driven Xcode preparation
 XCODE_READY_TESTS ?= 1
 
-.PHONY: help setup pyodide sync sync-fortweb payload-contract check-contract ios-doctor ios-resolve-sim ios-list-sims ios-list-devices xcode-ready dev-sim run-sim dev-device run-device parity-smoke logs-sim logs-device build test-swift test-swift-build test-swift-run test-ts test-e2e test-e2e-slow test-all bridge-check lint lint-ts open clean clean-payload clean-runtime clean-all doctor generated-check knip archive export upload
+.PHONY: help setup pyodide sync sync-fortweb payload-contract check-contract payload-package payload-import ios-doctor ios-resolve-sim ios-list-sims ios-list-devices xcode-ready dev-sim run-sim dev-device run-device parity-smoke logs-sim logs-device build test-swift test-swift-build test-swift-run test-ts test-e2e test-e2e-slow test-all bridge-check lint lint-ts open clean clean-payload clean-runtime clean-all doctor generated-check knip archive export upload
 
 help: ## Show available make targets
 	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | \
@@ -74,9 +74,20 @@ sync: ## Stage the shipped FortWeb payload into WebPayload/
 sync-fortweb: ## Explicit alias for the FortWeb wrapper staging path
 	PAYLOAD_SOURCE=fortweb FORTWEB_DIR=$(FORTWEB_DIR) ./sync-payload.sh
 
-payload-contract: ## Fail closed on blocked payload regressions and validate staged WebPayload
+payload-package: ## Build FortWeb runtime package (ZIP + digest sidecar)
+	@node "$(FORTWEB_DIR)/tools/package-runtime.mjs" --no-build
+
+payload-import: payload-package ## Import verified FortWeb runtime package into WebPayload
+	@ZIP=$$(ls -t "$(FORTWEB_DIR)/.tmp/runtime-packages"/fortweb-runtime-*.zip 2>/dev/null | head -1); \
+	if [ -z "$$ZIP" ]; then \
+	  echo "ERROR: No FortWeb runtime ZIP found. Run: make payload-package FORTWEB_DIR=$(FORTWEB_DIR)"; \
+	  exit 1; \
+	fi; \
+	echo "[payload-import] Importing $$(basename $$ZIP)..."; \
+	node tools/import-fortweb-runtime-package.mjs "$$ZIP"
+
+payload-contract: payload-import ## Import FortWeb runtime package and run full validation
 	node tools/assert-no-proof-demo-shell.mjs
-	PAYLOAD_SOURCE=fortweb FORTWEB_DIR=$(FORTWEB_DIR) ./sync-payload.sh
 	node tools/validate-mobile-payload.mjs --payload-dir WebPayload --target ios-webpayload
 	node tools/assert-payload-integrity.mjs --payload-dir WebPayload
 	node tools/assert-pyodide-runtime.mjs --payload-dir WebPayload
