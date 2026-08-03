@@ -255,7 +255,7 @@ test-swift-build: ## Build Swift tests (no simulator boot required)
 	  -project $(XCODE_PROJECT) \
 	  -scheme $(SCHEME) \
 	  -configuration Debug \
-	  -destination 'platform=iOS Simulator,name=Any iOS Simulator Device' \
+	  -destination '$(SIM_DESTINATION)' \
 	  -derivedDataPath $(SIM_DERIVED_DATA) \
 	  build
 
