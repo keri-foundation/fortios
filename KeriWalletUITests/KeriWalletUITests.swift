@@ -34,7 +34,7 @@ final class KeriWalletUITests: XCTestCase {
             return
         }
 
-        let heading = webView.staticTexts["Your Vaults"]
+        let heading = webView.staticTexts["Vaults"]
         XCTAssertTrue(
             heading.waitForExistence(timeout: 15),
             "Vault picker should display 'Your Vaults' heading"
@@ -48,7 +48,7 @@ final class KeriWalletUITests: XCTestCase {
             return
         }
 
-        let createButton = webView.buttons["Create Vault"]
+        let createButton = webView.buttons["Initialize New Vault"]
         XCTAssertTrue(
             createButton.waitForExistence(timeout: 15),
             "Vault picker should display 'Create Vault' button"
