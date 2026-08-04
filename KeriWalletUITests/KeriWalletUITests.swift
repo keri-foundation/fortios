@@ -42,9 +42,16 @@ final class KeriWalletUITests: XCTestCase {
         }
         vaultsToggle.tap()
 
-        let heading = webView.staticTexts["Vaults"]
+        // Wait for the drawer container (aside role="dialog" aria-label="Vault switcher")
+        let drawer = webView.otherElements["Vault switcher"]
+        guard drawer.waitForExistence(timeout: 10) else {
+            XCTFail("Vault drawer did not open")
+            return
+        }
+
+        let heading = drawer.staticTexts["Vaults"]
         XCTAssertTrue(
-            heading.waitForExistence(timeout: 10),
+            heading.waitForExistence(timeout: 5),
             "Vault drawer should display 'Vaults' heading"
         )
     }
@@ -64,9 +71,16 @@ final class KeriWalletUITests: XCTestCase {
         }
         vaultsToggle.tap()
 
-        let createButton = webView.buttons["Initialize New Vault"]
+        // Wait for the drawer container (aside role="dialog" aria-label="Vault switcher")
+        let drawer = webView.otherElements["Vault switcher"]
+        guard drawer.waitForExistence(timeout: 10) else {
+            XCTFail("Vault drawer did not open")
+            return
+        }
+
+        let createButton = drawer.buttons["Initialize New Vault"]
         XCTAssertTrue(
-            createButton.waitForExistence(timeout: 10),
+            createButton.waitForExistence(timeout: 5),
             "Vault drawer should display 'Initialize New Vault' button"
         )
     }
