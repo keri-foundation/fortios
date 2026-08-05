@@ -149,7 +149,7 @@ jobs:
 
       - name: Resolve simulator destination
         run: |
-          SIM_UDID="$(./scripts/resolve-ios-simulator.py --name "$SIMULATOR_NAME" --os "$SIMULATOR_OS")"
+          SIM_UDID="$(python3 ./scripts/resolve-ios-simulator.py --name "$SIMULATOR_NAME" --os "$SIMULATOR_OS" | grep 'simulator-udid' | cut -d= -f2)"
           echo "SIM_UDID=$SIM_UDID" >> "$GITHUB_ENV"
           echo "Resolved: $SIM_UDID"
 
@@ -169,7 +169,7 @@ jobs:
         if: failure()
         run: |
           set -euxo pipefail
-          SIM_UDID="$(make -s ios-resolve-sim 2>/dev/null || echo '')"
+          SIM_UDID="$(python3 ./scripts/resolve-ios-simulator.py --name "$SIMULATOR_NAME" --os "$SIMULATOR_OS" | grep 'simulator-udid' | cut -d= -f2)"
           echo "::group::Simulator logs (last 200 lines)"
           if [ -n "$SIM_UDID" ]; then
             xcrun simctl spawn "$SIM_UDID" log show --last 2m --predicate 'subsystem CONTAINS "com.apple.dt.XCTest" OR process CONTAINS "KeriWallet"' 2>/dev/null | tail -200 || echo "SIM_LOG_FAILED"
