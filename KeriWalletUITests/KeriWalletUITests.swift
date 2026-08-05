@@ -27,6 +27,42 @@ final class KeriWalletUITests: XCTestCase {
 
     // MARK: - Vault Picker
 
+    /// Opens the vault drawer: waits for the Vaults toggle to become enabled,
+    /// taps it, and returns the drawer element. Fails the test with a precise
+    /// message if any step times out.
+    private func openVaultDrawer(webView: XCUIElement, toggleTimeout: TimeInterval = 10.0, drawerTimeout: TimeInterval = 10.0) -> XCUIElement {
+        let vaultsToggle = webView.buttons["Vaults"]
+        guard vaultsToggle.waitForExistence(timeout: toggleTimeout) else {
+            XCTFail("Vaults toggle button did not appear")
+            return webView // unreachable; satisfies the compiler
+        }
+
+        let enabled = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "enabled == true"),
+            object: vaultsToggle
+        )
+        guard XCTWaiter().wait(for: [enabled], timeout: toggleTimeout) == .completed else {
+            XCTFail(vaultsToggle.isHittable
+                ? "Vaults toggle is hittable but never became enabled"
+                : "Vaults toggle exists but never became enabled")
+            return webView
+        }
+
+        vaultsToggle.tap()
+
+        // The drawer is an <aside role="dialog" aria-label="Vault switcher">.
+        // WebKit appends ", web dialog" to the accessible label, so use a
+        // predicate instead of an exact string match.
+        let drawerPredicate = NSPredicate(format: "label BEGINSWITH 'Vault switcher'")
+        let drawer = webView.otherElements.element(matching: drawerPredicate)
+        guard drawer.waitForExistence(timeout: drawerTimeout) else {
+            XCTFail("Vault drawer did not open (label BEGINSWITH 'Vault switcher')")
+            return webView
+        }
+
+        return drawer
+    }
+
     func test_vault_picker_shows_your_vaults_heading() {
         let webView = app.webViews.firstMatch
         guard webView.waitForExistence(timeout: 30) else {
@@ -34,20 +70,7 @@ final class KeriWalletUITests: XCTestCase {
             return
         }
 
-        // Open the vault drawer via the topbar toggle button
-        let vaultsToggle = webView.buttons["Vaults"]
-        guard vaultsToggle.waitForExistence(timeout: 10) else {
-            XCTFail("Vault drawer toggle button did not appear")
-            return
-        }
-        vaultsToggle.tap()
-
-        // Wait for the drawer container (aside role="dialog" aria-label="Vault switcher")
-        let drawer = webView.otherElements["Vault switcher"]
-        guard drawer.waitForExistence(timeout: 10) else {
-            XCTFail("Vault drawer did not open")
-            return
-        }
+        let drawer = openVaultDrawer(webView: webView)
 
         let heading = drawer.staticTexts["Vaults"]
         XCTAssertTrue(
@@ -63,20 +86,7 @@ final class KeriWalletUITests: XCTestCase {
             return
         }
 
-        // Open the vault drawer via the topbar toggle button
-        let vaultsToggle = webView.buttons["Vaults"]
-        guard vaultsToggle.waitForExistence(timeout: 10) else {
-            XCTFail("Vault drawer toggle button did not appear")
-            return
-        }
-        vaultsToggle.tap()
-
-        // Wait for the drawer container (aside role="dialog" aria-label="Vault switcher")
-        let drawer = webView.otherElements["Vault switcher"]
-        guard drawer.waitForExistence(timeout: 10) else {
-            XCTFail("Vault drawer did not open")
-            return
-        }
+        let drawer = openVaultDrawer(webView: webView)
 
         let createButton = drawer.buttons["Initialize New Vault"]
         XCTAssertTrue(
