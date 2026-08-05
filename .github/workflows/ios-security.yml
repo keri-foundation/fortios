@@ -148,9 +148,10 @@ jobs:
         run: make payload-contract
 
       - name: Resolve simulator destination
+        id: resolve-sim
         run: |
           SIM_UDID="$(python3 ./scripts/resolve-ios-simulator.py --udid)"
-          echo "SIM_UDID=$SIM_UDID" >> "$GITHUB_ENV"
+          echo "sim_udid=$SIM_UDID" >> "$GITHUB_OUTPUT"
           echo "Resolved: $SIM_UDID"
 
       - name: Build and test Swift (native unit + UI)
@@ -161,7 +162,7 @@ jobs:
             -project KeriWallet.xcodeproj \
             -scheme KeriWallet \
             -configuration Debug \
-            -destination "platform=iOS Simulator,id=$SIM_UDID" \
+            -destination "platform=iOS Simulator,id=${{ steps.resolve-sim.outputs.sim_udid }}" \
             -resultBundlePath "$RESULT_BUNDLE_PATH" \
             -derivedDataPath build/DerivedData-sim
 
