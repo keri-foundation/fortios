@@ -147,58 +147,23 @@ jobs:
       - name: Enforce wrapper payload contract
         run: make payload-contract
 
-      - name: Build Swift for testing
-        timeout-minutes: 15
-        run: make test-swift-build
+      - name: Resolve simulator destination
+        run: |
+          SIM_UDID="$(./scripts/resolve-ios-simulator.py --name "$SIMULATOR_NAME" --os "$SIMULATOR_OS")"
+          echo "SIM_UDID=$SIM_UDID" >> "$GITHUB_ENV"
+          echo "Resolved: $SIM_UDID"
 
-      - name: Inspect native XCTest bundle before testing
+      - name: Build and test Swift (native unit + UI)
+        timeout-minutes: 40
         run: |
           set -euxo pipefail
-          BUNDLE_DIR="build/DerivedData-sim/Build/Products/Debug-iphonesimulator/KeriWallet.app/PlugIns/KeriWalletTests.xctest"
-          XCTESTRUN="$(find build/DerivedData-sim/Build/Products -name '*.xctestrun' -print -quit)"
-
-          echo "::group::Bundle tree"
-          find "$BUNDLE_DIR" -maxdepth 3 -print 2>/dev/null || echo "BUNDLE_NOT_FOUND"
-          echo "::endgroup::"
-
-          echo "::group::Bundle Info.plist"
-          plutil -p "$BUNDLE_DIR/Info.plist" 2>/dev/null || echo "NO_INFOPLIST"
-          echo "::endgroup::"
-
-          echo "::group::Bundle executable"
-          EXEC_PATH="$BUNDLE_DIR/KeriWalletTests"
-          if [ -f "$EXEC_PATH" ]; then
-            file "$EXEC_PATH"
-            lipo -info "$EXEC_PATH"
-            otool -L "$EXEC_PATH" | head -20
-          else
-            echo "EXECUTABLE_NOT_FOUND"
-          fi
-          echo "::endgroup::"
-
-          echo "::group::Bundle code signature"
-          codesign -dvvv "$BUNDLE_DIR" 2>&1 || echo "CODESIGN_FAILED"
-          echo "::endgroup::"
-
-          echo "::group::Frameworks directory"
-          ls -la build/DerivedData-sim/Build/Products/Debug-iphonesimulator/KeriWallet.app/Frameworks/ 2>/dev/null || echo "NO_FRAMEWORKS"
-          echo "::endgroup::"
-
-          echo "::group::PlugIns directory"
-          ls -la build/DerivedData-sim/Build/Products/Debug-iphonesimulator/KeriWallet.app/PlugIns/ 2>/dev/null || echo "NO_PLUGINS"
-          echo "::endgroup::"
-
-          echo "::group::xctestrun native bundle entry"
-          if [ -n "$XCTESTRUN" ]; then
-            plutil -p "$XCTESTRUN" 2>/dev/null | grep -A 50 'KeriWalletTests' | head -60
-          else
-            echo "XCTESTRUN_NOT_FOUND"
-          fi
-          echo "::endgroup::"
-
-      - name: Run Swift tests
-        timeout-minutes: 25
-        run: make test-swift-run
+          FORTWEB_DIR="$FORTWEB_DIR" xcodebuild test \
+            -project KeriWallet.xcodeproj \
+            -scheme KeriWallet \
+            -configuration Debug \
+            -destination "platform=iOS Simulator,id=$SIM_UDID" \
+            -resultBundlePath "$RESULT_BUNDLE_PATH" \
+            -derivedDataPath build/DerivedData-sim
 
       - name: Collect native bundle failure diagnostics
         if: failure()
