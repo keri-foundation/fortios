@@ -151,9 +151,85 @@ jobs:
         timeout-minutes: 15
         run: make test-swift-build
 
+      - name: Inspect native XCTest bundle before testing
+        run: |
+          set -euxo pipefail
+          BUNDLE_DIR="build/DerivedData-sim/Build/Products/Debug-iphonesimulator/KeriWallet.app/PlugIns/KeriWalletTests.xctest"
+          XCTESTRUN="$(find build/DerivedData-sim/Build/Products -name '*.xctestrun' -print -quit)"
+
+          echo "::group::Bundle tree"
+          find "$BUNDLE_DIR" -maxdepth 3 -print 2>/dev/null || echo "BUNDLE_NOT_FOUND"
+          echo "::endgroup::"
+
+          echo "::group::Bundle Info.plist"
+          plutil -p "$BUNDLE_DIR/Info.plist" 2>/dev/null || echo "NO_INFOPLIST"
+          echo "::endgroup::"
+
+          echo "::group::Bundle executable"
+          EXEC_PATH="$BUNDLE_DIR/KeriWalletTests"
+          if [ -f "$EXEC_PATH" ]; then
+            file "$EXEC_PATH"
+            lipo -info "$EXEC_PATH"
+            otool -L "$EXEC_PATH" | head -20
+          else
+            echo "EXECUTABLE_NOT_FOUND"
+          fi
+          echo "::endgroup::"
+
+          echo "::group::Bundle code signature"
+          codesign -dvvv "$BUNDLE_DIR" 2>&1 || echo "CODESIGN_FAILED"
+          echo "::endgroup::"
+
+          echo "::group::Frameworks directory"
+          ls -la build/DerivedData-sim/Build/Products/Debug-iphonesimulator/KeriWallet.app/Frameworks/ 2>/dev/null || echo "NO_FRAMEWORKS"
+          echo "::endgroup::"
+
+          echo "::group::PlugIns directory"
+          ls -la build/DerivedData-sim/Build/Products/Debug-iphonesimulator/KeriWallet.app/PlugIns/ 2>/dev/null || echo "NO_PLUGINS"
+          echo "::endgroup::"
+
+          echo "::group::xctestrun native bundle entry"
+          if [ -n "$XCTESTRUN" ]; then
+            plutil -p "$XCTESTRUN" 2>/dev/null | grep -A 50 'KeriWalletTests' | head -60
+          else
+            echo "XCTESTRUN_NOT_FOUND"
+          fi
+          echo "::endgroup::"
+
       - name: Run Swift tests
         timeout-minutes: 25
         run: make test-swift-run
+
+      - name: Collect native bundle failure diagnostics
+        if: failure()
+        run: |
+          set -euxo pipefail
+          SIM_UDID="$(make -s ios-resolve-sim 2>/dev/null || echo '')"
+          echo "::group::Simulator logs (last 200 lines)"
+          if [ -n "$SIM_UDID" ]; then
+            xcrun simctl spawn "$SIM_UDID" log show --last 2m --predicate 'subsystem CONTAINS "com.apple.dt.XCTest" OR process CONTAINS "KeriWallet"' 2>/dev/null | tail -200 || echo "SIM_LOG_FAILED"
+          else
+            echo "NO_SIM_UDID"
+          fi
+          echo "::endgroup::"
+
+          echo "::group::Crash reports"
+          find ~/Library/Logs/DiagnosticReports -name 'KeriWallet*' -mmin -30 -print -exec cat {} \; 2>/dev/null || echo "NO_CRASH_REPORTS"
+          echo "::endgroup::"
+
+          echo "::group::dyld reports"
+          find ~/Library/Logs/DiagnosticReports -name '*.dyld_*' -mmin -30 -print -exec cat {} \; 2>/dev/null || echo "NO_DYLD_REPORTS"
+          echo "::endgroup::"
+
+      - name: Upload native bundle failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-bundle-diagnostics
+          path: |
+            ~/Library/Logs/DiagnosticReports/KeriWallet*
+            ~/Library/Logs/DiagnosticReports/*.dyld_*
+          if-no-files-found: ignore
 
       - name: Upload Swift test results
         if: failure() || cancelled()
