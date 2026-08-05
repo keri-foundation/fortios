@@ -21,20 +21,6 @@
                ReferencedContainer = "container:KeriWallet.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
-         <BuildActionEntry
-            buildForTesting = "YES"
-            buildForRunning = "NO"
-            buildForProfiling = "NO"
-            buildForArchiving = "NO"
-            buildForAnalyzing = "NO">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "E0F91FA52F48E06C000C52E9"
-               BuildableName = "KeriWalletTests.xctest"
-               BlueprintName = "KeriWalletTests"
-               ReferencedContainer = "container:KeriWallet.xcodeproj">
-            </BuildableReference>
-         </BuildActionEntry>
       </BuildActionEntries>
    </BuildAction>
    <TestAction
