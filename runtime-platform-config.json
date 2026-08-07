@@ -1,0 +1,41 @@
+{
+  "schema": "fort.runtime-platform-config.v1",
+  "version": 1,
+  "platform": "ios-wkwebview",
+  "requirements_compatibility": {
+    "supported_schemas": ["fort.runtime-requirements.v1"],
+    "supported_profiles": ["offline-runtime"]
+  },
+  "origin": {
+    "scheme": "app",
+    "host": "local",
+    "stability": "fixed-across-launches"
+  },
+  "network": {
+    "policy": "deny-all",
+    "allowed_schemes": ["app"]
+  },
+  "assets": {
+    "source": "application-bundle",
+    "delivery": "custom-scheme-handler"
+  },
+  "workers": {
+    "available": true,
+    "framework": "wkwebview-javascript"
+  },
+  "storage": {
+    "mechanism": "webkit-persistent",
+    "partition": "fixed-namespace"
+  },
+  "security_context": {
+    "mechanism": "custom-scheme-tls-like"
+  },
+  "bridge": {
+    "provenance": "main-frame-only",
+    "origin_validation": "exact-scheme-host-match"
+  },
+  "entrypoint": {
+    "source": "manifest-declared",
+    "fallback": "none"
+  }
+}

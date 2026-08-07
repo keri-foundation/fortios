@@ -19,7 +19,9 @@
     "check:containment": "node tools/assert-payload-containment.mjs",
     "check:integrity": "node tools/assert-payload-integrity.mjs",
     "check:pyodide": "node tools/assert-pyodide-runtime.mjs",
-    "check:payload": "npm run check:containment && npm run check:integrity && npm run check:pyodide"
+    "check:payload": "npm run check:containment && npm run check:integrity && npm run check:pyodide",
+    "validate:runtime-platform-config": "node tools/validate-runtime-platform-config.mjs",
+    "test:runtime-platform-config": "node --test tools/validate-runtime-platform-config.test.mjs"
   },
   "engines": {
     "node": "22.12.0"
