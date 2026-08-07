@@ -99,6 +99,18 @@ jobs:
       - name: Enforce wrapper payload contract
         run: make payload-contract
 
+      - name: Validate runtime platform configuration
+        run: npm run validate:runtime-platform-config
+
+      - name: Test runtime platform configuration
+        run: npm run test:runtime-platform-config
+
+      - name: Validate runtime requirements compatibility
+        run: npm run validate:runtime-requirements-compatibility
+
+      - name: Test runtime requirements compatibility
+        run: npm run test:runtime-requirements-compatibility
+
       - name: Run TypeScript unit tests
         run: make test-ts
 
@@ -146,6 +158,9 @@ jobs:
 
       - name: Enforce wrapper payload contract
         run: make payload-contract
+
+      - name: Validate runtime requirements compatibility
+        run: npm run validate:runtime-requirements-compatibility
 
       - name: Resolve simulator destination
         id: resolve-sim

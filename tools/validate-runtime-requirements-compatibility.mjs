@@ -56,6 +56,8 @@ const REQUIRED_FORBIDDEN_BEHAVIORS = [
     'http_fallback',
 ];
 
+const ALLOWED_SECURITY_MECHANISMS = ['custom-scheme-tls-like'];
+
 // --- Compatibility predicates ---
 // Each maps a producer requirement to a check over the platform config.
 // Returns { compatible: true } or { compatible: false, reason: '...' }.
@@ -79,6 +81,9 @@ const CAPABILITY_PREDICATES = {
     secure_context(cfg) {
         if (!cfg.security_context?.mechanism) {
             return { compatible: false, reason: 'security context mechanism not declared' };
+        }
+        if (!ALLOWED_SECURITY_MECHANISMS.includes(cfg.security_context.mechanism)) {
+            return { compatible: false, reason: `security_context mechanism '${cfg.security_context.mechanism}' is not a recognized secure-context mechanism` };
         }
         return { compatible: true };
     },
