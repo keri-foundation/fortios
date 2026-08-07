@@ -124,7 +124,7 @@ struct PayloadIntegrityTests {
         if path.contains("\\") { throw PayloadIntegrityError.unsafePath }
         if path.contains("..") { throw PayloadIntegrityError.unsafePath }
         // Verify resolved URL stays within payload root
-        let resolved = URL(fileURLWithPath: path, relativeTo: payloadRootURL)?
+        let resolved = URL(fileURLWithPath: path, relativeTo: payloadRootURL)
             .standardizedFileURL
         guard let resolvedURL = resolved,
               resolvedURL.path.hasPrefix(payloadRootURL.path)
