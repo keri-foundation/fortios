@@ -72,7 +72,7 @@ jobs:
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
         with:
           repository: keri-foundation/fortweb
-          ref: b922effe54990a3eaf72b5667aa529ea31110e25
+          ref: 84f76995cbf25a8432d422776ca34f863b0f99ac
           path: .deps/fortweb
 
       - name: Set up Node
@@ -126,7 +126,7 @@ jobs:
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
         with:
           repository: keri-foundation/fortweb
-          ref: b922effe54990a3eaf72b5667aa529ea31110e25
+          ref: 84f76995cbf25a8432d422776ca34f863b0f99ac
           path: .deps/fortweb
 
       - name: Set up Node

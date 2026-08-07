@@ -21,7 +21,9 @@
     "check:pyodide": "node tools/assert-pyodide-runtime.mjs",
     "check:payload": "npm run check:containment && npm run check:integrity && npm run check:pyodide",
     "validate:runtime-platform-config": "node tools/validate-runtime-platform-config.mjs",
-    "test:runtime-platform-config": "node --test tools/validate-runtime-platform-config.test.mjs"
+    "test:runtime-platform-config": "node --test tools/validate-runtime-platform-config.test.mjs",
+    "validate:runtime-requirements-compatibility": "node tools/validate-runtime-requirements-compatibility.mjs",
+    "test:runtime-requirements-compatibility": "node --test tools/validate-runtime-requirements-compatibility.test.mjs"
   },
   "engines": {
     "node": "22.12.0"
