@@ -5,6 +5,11 @@
 DerivedData/
 build/
 
+# Local/generated App Store export options (environment-specific release
+# configuration that may contain signing/provisioning mappings). The
+# committed template is ExportOptions.plist.example.
+ExportOptions.plist
+
 # Xcode per-user state inside nested projects
 xcodeproj/**/xcuserdata/
 
