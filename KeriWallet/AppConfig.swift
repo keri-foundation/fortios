@@ -21,8 +21,10 @@ enum AppConfig {
     enum Scheme {
         /// Custom URL scheme registered with WKWebView for serving bundled assets.
         static let name = "app"
-        /// Initial URL loaded by the web container.
-        static let entryURL = "app://local/index.html"
+        /// Initial URL loaded by the web container. Derived from the producer-declared
+        /// entry document so the native startup URL always points at the exact bundled
+        /// entrypoint declared in the payload manifest (`Payload.requiredEntryDocument`).
+        static let entryURL = "\(name)://local/\(Payload.requiredEntryDocument)"
         /// Schemes the navigation policy allows. `about` is needed for `about:blank`.
         static let allowedSchemes: Set<String> = ["app", "about"]
         /// The only `about:` URL we permit — WebKit uses it internally.
