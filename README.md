@@ -177,7 +177,7 @@ Run `make help` at any time to list all available targets.
 |--------|-------------|
 | `make help` | List all targets with descriptions |
 | `make setup` | Install Node dependencies (`npm ci`) |
-| `make pyodide` | Download Pyodide v0.29.1 runtime + crypto wheels into `public/pyodide/` |
+| `make pyodide` | Download Pyodide v0.29.3 runtime + crypto wheels into `public/pyodide/` |
 | `make sync` | Stage the FortWeb product-shell payload into `WebPayload/` |
 | `make sync-fortweb` | Explicit alias for the FortWeb wrapper staging path |
 | `make payload-contract` | Scan active sources for blocked legacy payload posture and validate the staged `WebPayload/` manifest |

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # download-pyodide.sh
-# Downloads Pyodide v0.29.1 runtime assets + crypto wheels into public/pyodide/.
+# Downloads Pyodide v0.29.3 runtime assets + crypto wheels into public/pyodide/.
 # Run once per machine (or after a clean). Output is gitignored.
 #
 # Usage: ./scripts/download-pyodide.sh [--force]
@@ -13,12 +13,12 @@ FORTWEB_DIR="$(cd "${PAYLOAD_DIR}/../../libs/fortweb" && pwd)"
 OUT_DIR="${PAYLOAD_DIR}/public/pyodide"
 WHEELS_DIR="${OUT_DIR}/wheels"
 
-PYODIDE_VERSION="0.29.1"
+PYODIDE_VERSION="0.29.3"
 CDN_BASE="https://cdn.jsdelivr.net/pyodide/v${PYODIDE_VERSION}/full"
 
 # Core runtime files required by loadPyodide()
 CORE_FILES=(
-  "pyodide.js"
+  "pyodide.mjs"
   "pyodide.asm.wasm"
   "pyodide.asm.js"
   "pyodide-lock.json"
@@ -69,6 +69,11 @@ for FILE in "${CORE_FILES[@]}"; do
   SIZE=$(du -sh "${DEST}" | cut -f1)
   info "downloaded ${FILE} (${SIZE})"
 done
+
+# The worker loads Pyodide via importScripts("pyodide.js"). Pyodide 0.29.x ships
+# the loader as pyodide.mjs (a UMD-compatible bundle), so expose the classic
+# filename as a symlink for the worker's importScripts path.
+ln -sf pyodide.mjs "${OUT_DIR}/pyodide.js"
 
 # ── 2. blake3 wheel - copy from fortweb/wheels/ ──────────────────────────────
 echo ""
