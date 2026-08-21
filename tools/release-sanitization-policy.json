@@ -1,0 +1,117 @@
+{
+  "$comment": "Single source of truth for Release archive sanitization. Read by tools/assert-release-archive.mjs. Bans are grounded in repository/application architecture: the app is a thin WKWebView wrapper whose only web content is the producer-owned WebPayload bundle. Everything outside WebPayload must be a native app resource.",
+  "schema": "fort.ios-release-sanitization.v1",
+  "archive": {
+    "products_subpath": "Products/Applications",
+    "expected_app_name": "KeriWallet.app"
+  },
+  "app_bundle": {
+    "payload_subdirectory": "WebPayload",
+    "executable_name": "KeriWallet",
+    "allowed_top_level_files": [
+      "Info.plist",
+      "PkgInfo",
+      "Assets.car",
+      "PrivacyInfo.xcprivacy",
+      "KeriWallet",
+      "embedded.mobileprovision"
+    ],
+    "allowed_top_level_file_patterns": [
+      "AppIcon*.png"
+    ],
+    "allowed_top_level_directories": [
+      "WebPayload",
+      "Frameworks",
+      "_CodeSignature"
+    ],
+    "allowed_top_level_directory_patterns": [
+      "*.lproj"
+    ],
+    "localized_directory_allowed_entries": [
+      "*.storyboardc",
+      "*.strings",
+      "*.stringsdict"
+    ],
+    "signature_directory_allowed_entries": [
+      "CodeResources",
+      "CodeDirectory",
+      "CodeRequirements",
+      "CodeRequirements-1",
+      "CodeSignature"
+    ]
+  },
+  "contract": {
+    "requirements_schema": "fort.runtime-requirements.v1",
+    "requirements_version": 1
+  },
+  "offline_closure": {
+    "scan_extensions": [
+      ".css",
+      ".html",
+      ".js",
+      ".json",
+      ".mjs",
+      ".py",
+      ".toml",
+      ".txt"
+    ],
+    "exclude_files": [
+      "manifest.json",
+      "checksums.sha256"
+    ],
+    "forbidden_markers": [
+      {
+        "pattern": "cdn.jsdelivr.net",
+        "reason": "Pyodide/runtime CDN URL must not be a runtime dependency"
+      },
+      {
+        "pattern": "unpkg.com",
+        "reason": "runtime package CDN URL must not be a runtime dependency"
+      },
+      {
+        "pattern": "cdnjs.cloudflare.com",
+        "reason": "runtime package CDN URL must not be a runtime dependency"
+      },
+      {
+        "pattern": "cdn.pyscript.net",
+        "reason": "Pyodide CDN URL must not be a runtime dependency"
+      },
+      {
+        "pattern": "files.pythonhosted.org",
+        "reason": "wheel download URL must not be a runtime dependency"
+      },
+      {
+        "pattern": "pypi.org",
+        "reason": "wheel download URL must not be a runtime dependency"
+      },
+      {
+        "pattern": "localhost",
+        "reason": "local development server origin must not be a runtime dependency"
+      },
+      {
+        "pattern": "127.0.0.1",
+        "reason": "local loopback origin must not be a runtime dependency"
+      },
+      {
+        "pattern": "0.0.0.0",
+        "reason": "local development bind address must not be a runtime dependency"
+      },
+      {
+        "pattern": "file://",
+        "reason": "file:// developer reference must not be a runtime dependency"
+      },
+      {
+        "pattern": "/Users/",
+        "reason": "source-checkout absolute path must not be a runtime dependency"
+      },
+      {
+        "pattern": "/home/",
+        "reason": "source-checkout absolute path must not be a runtime dependency"
+      },
+      {
+        "pattern": "/github/workspace/",
+        "reason": "CI source-checkout path must not be a runtime dependency"
+      }
+    ]
+  }
+}

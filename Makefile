@@ -35,7 +35,7 @@ DEVICE_REF    ?=
 # FortWeb-driven Xcode preparation
 XCODE_READY_TESTS ?= 1
 
-.PHONY: help setup pyodide sync sync-fortweb payload-contract check-contract payload-package payload-import ios-doctor ios-resolve-sim ios-list-sims ios-list-devices xcode-ready dev-sim run-sim dev-device run-device parity-smoke logs-sim logs-device build test-swift test-swift-build test-swift-run test-ts test-e2e test-e2e-slow test-all bridge-check lint lint-ts open clean clean-payload clean-runtime clean-all doctor generated-check knip archive export upload
+.PHONY: help setup pyodide sync sync-fortweb payload-contract check-contract payload-package payload-import ios-doctor ios-resolve-sim ios-list-sims ios-list-devices xcode-ready dev-sim run-sim dev-device run-device parity-smoke logs-sim logs-device build test-swift test-swift-build test-swift-run test-ts test-e2e test-e2e-slow test-all bridge-check lint lint-ts open clean clean-payload clean-runtime clean-all doctor generated-check knip archive archive-structural archive-verify export upload
 
 help: ## Show available make targets
 	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | \
@@ -357,6 +357,19 @@ archive: sync ## Archive KeriWallet for App Store (Release)
 	  -archivePath $(ARCHIVE_PATH) \
 	  -destination 'generic/platform=iOS' \
 	  -allowProvisioningUpdates
+
+archive-structural: ## Build unsigned Release .xcarchive for structural/payload proof
+	xcodebuild archive \
+	  -project $(XCODE_PROJECT) \
+	  -scheme $(SCHEME) \
+	  -configuration Release \
+	  -destination 'generic/platform=iOS' \
+	  -archivePath $(ARCHIVE_PATH) \
+	  -derivedDataPath $(DEVICE_DERIVED_DATA) \
+	  CODE_SIGNING_ALLOWED=NO
+
+archive-verify: ## Verify the Release archive contains the validated production payload
+	node tools/assert-release-archive.mjs --archive $(ARCHIVE_PATH)
 
 export: archive ## Export .ipa from archive using ExportOptions.plist
 	@if [ ! -f $(EXPORT_OPTS) ]; then \

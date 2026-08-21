@@ -219,3 +219,59 @@ jobs:
           name: swift-test-results
           path: ${{ env.RESULT_BUNDLE_PATH }}
           if-no-files-found: ignore
+
+  archive-proof:
+    runs-on: macos-26
+    timeout-minutes: 45
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.5.app/Contents/Developer
+      FORTWEB_DIR: ${{ github.workspace }}/.deps/fortweb
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
+        with:
+          fetch-depth: 0
+
+      - name: Check out FortWeb dependency
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
+        with:
+          repository: keri-foundation/fortweb
+          ref: e079701a337468acb1484a1c2cf86acc517d8464
+          path: .deps/fortweb
+
+      - name: Set up Node
+        uses: actions/setup-node@60edb5dd545a775178f52524783378180af0d1f8
+        with:
+          node-version: '22.12.0'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build FortWeb runtime
+        run: |
+          npm ci --prefix "$FORTWEB_DIR"
+          npm run build:runtime --prefix "$FORTWEB_DIR"
+          test -f "$FORTWEB_DIR/dist/runtime/app/app/main.js"
+
+      - name: Enforce wrapper payload contract (import + validate)
+        run: make payload-contract
+
+      - name: Run release archive verifier unit tests
+        run: npx vitest run tools/__tests__/release-archive.test.mjs
+
+      - name: Build unsigned Release archive
+        timeout-minutes: 25
+        run: |
+          xcodebuild archive \
+            -project KeriWallet.xcodeproj \
+            -scheme KeriWallet \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/KeriWallet.xcarchive \
+            -derivedDataPath build/DerivedData-device \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Verify archived payload integrity
+        run: node tools/assert-release-archive.mjs --archive build/KeriWallet.xcarchive

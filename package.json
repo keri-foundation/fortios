@@ -23,7 +23,8 @@
     "validate:runtime-platform-config": "node tools/validate-runtime-platform-config.mjs",
     "test:runtime-platform-config": "node --test tools/validate-runtime-platform-config.test.mjs",
     "validate:runtime-requirements-compatibility": "node tools/validate-runtime-requirements-compatibility.mjs",
-    "test:runtime-requirements-compatibility": "node --test tools/validate-runtime-requirements-compatibility.test.mjs"
+    "test:runtime-requirements-compatibility": "node --test tools/validate-runtime-requirements-compatibility.test.mjs",
+    "verify:release-archive": "node tools/assert-release-archive.mjs"
   },
   "engines": {
     "node": "22.12.0"
