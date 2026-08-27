@@ -166,7 +166,7 @@ final class PayloadSchemeHandler: NSObject, WKURLSchemeHandler {
         let decoded = urlPath.removingPercentEncoding ?? urlPath
         let trimmed = decoded.hasPrefix("/") ? String(decoded.dropFirst()) : decoded
 
-        let parts = trimmed.split(separator: "/", omittingEmptySubsequences: true)
+        var parts = trimmed.split(separator: "/", omittingEmptySubsequences: true)
         if parts.isEmpty {
             return AppConfig.Scheme.defaultIndexPath
         }
@@ -174,6 +174,19 @@ final class PayloadSchemeHandler: NSObject, WKURLSchemeHandler {
         for part in parts {
             if part == "." || part == ".." {
                 throw PayloadSchemeError.disallowedPath
+            }
+        }
+
+        // The FortWeb runtime addresses bundled resources under a virtual
+        // `/fortweb/` mount (e.g. `/fortweb/wheels/...`, `/fortweb/vendor/...`).
+        // The iOS payload is packaged flat under WebPayload/, so map that
+        // mount segment onto the payload root rather than requiring a physical
+        // `fortweb/` directory. Only an actual leading path segment qualifies;
+        // unprefixed URLs keep their existing behaviour.
+        if let first = parts.first, first == "fortweb" {
+            parts.removeFirst()
+            if parts.isEmpty {
+                return AppConfig.Scheme.defaultIndexPath
             }
         }
 
