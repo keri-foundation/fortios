@@ -60,13 +60,16 @@ bridge-check: ## Verify BridgeContract.swift and BridgeContract.kt are up to dat
 # (build/runtime-source/manifest.json) and dist/runtime built.
 FORTWEB_RUNTIME_SOURCE_MANIFEST ?= build/runtime-source/manifest.json
 FORTWEB_RUNTIME_SOURCE_MANIFEST_SHA256 ?= 87bcc689d7778840a76284471ff599cef21be41df2b429724f7f4fdc5f022135
+# Producer ref recorded in release metadata. CI checkouts of the pinned FortWeb
+# commit are detached, so package:runtime cannot infer a ref via git symbolic-ref.
+FORTWEB_PACKAGE_REF ?= refs/heads/pyodide-314-runtime
 
 payload-package: ## Produce canonical FortWeb runtime package (FortWeb package:runtime -> dist/package)
 	@rm -rf "$(FORTWEB_DIR)/dist/package"
 	@cd "$(FORTWEB_DIR)" && \
 	  FORTWEB_RUNTIME_SOURCE_MANIFEST="$(FORTWEB_RUNTIME_SOURCE_MANIFEST)" \
 	  FORTWEB_RUNTIME_SOURCE_MANIFEST_SHA256="$(FORTWEB_RUNTIME_SOURCE_MANIFEST_SHA256)" \
-	  npm run package:runtime -- --python python3 --output-dir dist/package
+	  npm run package:runtime -- --python python3 --output-dir dist/package --ref "$(FORTWEB_PACKAGE_REF)"
 
 payload-import: payload-package ## Import the canonical FortWeb runtime package into WebPayload
 	@ZIP="$(FORTWEB_DIR)/dist/package/fortweb-runtime-0.0.0.zip"; \
