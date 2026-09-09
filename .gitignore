@@ -22,12 +22,8 @@ WebPayload/*
 WebPayloadOverride/*
 !WebPayloadOverride/.gitkeep
 
-# Web payload build outputs (never commit)
-dist/
+# Node tooling (never commit)
 node_modules/
-
-# Pyodide runtime (downloaded at build time via make pyodide)
-public/pyodide/
 
 # Python / misc
 __pycache__/

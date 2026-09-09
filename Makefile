@@ -3,7 +3,6 @@
 XCODE_PROJECT := KeriWallet.xcodeproj
 SCHEME        := KeriWallet
 APP_BUNDLE_ID := com.kerifoundation.wallet
-PAYLOAD_SOURCE ?= fortweb
 FORTWEB_DIR   ?= ../fortweb
 
 # ── Simulator resolution ─────────────────────────────────────────────────────
@@ -35,7 +34,7 @@ DEVICE_REF    ?=
 # FortWeb-driven Xcode preparation
 XCODE_READY_TESTS ?= 1
 
-.PHONY: help setup pyodide sync sync-fortweb payload-contract check-contract payload-package payload-import ios-doctor ios-resolve-sim ios-list-sims ios-list-devices xcode-ready dev-sim run-sim dev-device run-device parity-smoke logs-sim logs-device build test-swift test-swift-build test-swift-run test-ts test-e2e test-e2e-slow test-all bridge-check lint lint-ts open clean clean-payload clean-runtime clean-all doctor generated-check knip archive archive-structural archive-verify export upload
+.PHONY: help setup payload-contract payload-package payload-import bridge-check ios-doctor ios-resolve-sim ios-list-sims ios-list-devices xcode-ready run-sim build test-swift test-swift-build test-swift-run test-tools test-all open lint generated-check clean clean-payload clean-all doctor archive archive-structural archive-verify export upload
 
 help: ## Show available make targets
 	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | \
@@ -43,44 +42,37 @@ help: ## Show available make targets
 
 # ── Shared targets (platform-agnostic — reusable by Fort-android) ─────────────
 
-setup: ## Install Node dependencies for the web payload (run once after clone)
+setup: ## Install Node dependencies (run once after clone)
 	npm ci
 
-pyodide: ## Download Pyodide v0.29.3 runtime + crypto wheels (run once per machine)
-	bash scripts/download-pyodide.sh
+test-tools: ## Run Node tool tests (Vitest — payload/bridge/contract tooling)
+	npm test
 
-test-ts: ## Run TypeScript unit tests (Vitest)
-	npm run test
-
-test-e2e: ## Run Playwright E2E tests (excludes @slow Pyodide tests)
-	npm run build
-	npx playwright test --grep-invert "@slow"
-
-test-e2e-slow: ## Run all E2E tests including slow Pyodide roundtrip (120s timeout)
-	npm run build
-	npx playwright test
-
-bridge-check: ## Verify bridge-contract.ts, BridgeContract.swift, and BridgeContract.kt are up to date
+bridge-check: ## Verify BridgeContract.swift and BridgeContract.kt are up to date
 	npm run bridge:check
-
-lint-ts: ## Run TypeScript type check (tsc --noEmit)
-	npm run typecheck
 
 # ── iOS-only targets ──────────────────────────────────────────────────────────
 
-sync: ## Stage the shipped FortWeb payload into WebPayload/
-	PAYLOAD_SOURCE=$(PAYLOAD_SOURCE) FORTWEB_DIR=$(FORTWEB_DIR) ./sync-payload.sh
+# Canonical FortWeb runtime package is produced by FortWeb's OWN tooling
+# (package:runtime) from its reviewed runtime source. Fort-ios only imports the
+# resulting dist/package/fortweb-runtime-0.0.0.zip. FORTWEB_DIR must be a
+# FortWeb checkout (e.g. a #38 ref) with the reviewed runtime source acquired
+# (build/runtime-source/manifest.json) and dist/runtime built.
+FORTWEB_RUNTIME_SOURCE_MANIFEST ?= build/runtime-source/manifest.json
+FORTWEB_RUNTIME_SOURCE_MANIFEST_SHA256 ?= 87bcc689d7778840a76284471ff599cef21be41df2b429724f7f4fdc5f022135
 
-sync-fortweb: ## Explicit alias for the FortWeb wrapper staging path
-	PAYLOAD_SOURCE=fortweb FORTWEB_DIR=$(FORTWEB_DIR) ./sync-payload.sh
+payload-package: ## Produce canonical FortWeb runtime package (FortWeb package:runtime -> dist/package)
+	@rm -rf "$(FORTWEB_DIR)/dist/package"
+	@cd "$(FORTWEB_DIR)" && \
+	  FORTWEB_RUNTIME_SOURCE_MANIFEST="$(FORTWEB_RUNTIME_SOURCE_MANIFEST)" \
+	  FORTWEB_RUNTIME_SOURCE_MANIFEST_SHA256="$(FORTWEB_RUNTIME_SOURCE_MANIFEST_SHA256)" \
+	  npm run package:runtime -- --python python3 --output-dir dist/package
 
-payload-package: ## Build FortWeb runtime package (ZIP + digest sidecar)
-	@node "$(FORTWEB_DIR)/tools/package-runtime.mjs" --no-build
-
-payload-import: payload-package ## Import verified FortWeb runtime package into WebPayload
-	@ZIP=$$(ls -t "$(FORTWEB_DIR)/.tmp/runtime-packages"/fortweb-runtime-*.zip 2>/dev/null | head -1); \
-	if [ -z "$$ZIP" ]; then \
-	  echo "ERROR: No FortWeb runtime ZIP found. Run: make payload-package FORTWEB_DIR=$(FORTWEB_DIR)"; \
+payload-import: payload-package ## Import the canonical FortWeb runtime package into WebPayload
+	@ZIP="$(FORTWEB_DIR)/dist/package/fortweb-runtime-0.0.0.zip"; \
+	if [ ! -f "$$ZIP" ]; then \
+	  echo "ERROR: canonical FortWeb runtime ZIP not found at $$ZIP"; \
+	  echo "Ensure FORTWEB_DIR is a FortWeb checkout with reviewed runtime source acquired and dist/runtime built."; \
 	  exit 1; \
 	fi; \
 	echo "[payload-import] Importing $$(basename $$ZIP)..."; \
@@ -92,16 +84,6 @@ payload-contract: payload-import ## Import FortWeb runtime package and run full 
 	node tools/assert-payload-integrity.mjs --payload-dir WebPayload
 	node tools/assert-pyodide-runtime.mjs --payload-dir WebPayload
 	node tools/assert-payload-containment.mjs
-
-check-contract: ## Verify runtime-origin-contract.json exists and is valid JSON
-	@if [ ! -f WebPayload/fortweb/app/runtime-origin-contract.json ]; then \
-	  echo "ERROR: runtime-origin-contract.json is missing from WebPayload."; \
-	  echo "Run: make sync FORTWEB_DIR=../fortweb"; \
-	  exit 1; \
-	fi
-	@python3 -c "import json; json.load(open('WebPayload/fortweb/app/runtime-origin-contract.json'))" \
-	  || (echo "ERROR: runtime-origin-contract.json is not valid JSON." && exit 1)
-	@echo "[check-contract] runtime-origin-contract.json is present and valid."
 
 ios-list-sims: ## List available iOS Simulator destinations
 	xcrun simctl list devices available
@@ -122,10 +104,9 @@ ios-doctor: ## Verify Xcode, simulator, and payload-source readiness
 	@echo "deployment-target=$$(xcodebuild -project $(XCODE_PROJECT) -showBuildSettings 2>/dev/null | awk '/IPHONEOS_DEPLOYMENT_TARGET/ {print $$3}' | head -1)"
 	@echo "swift-version=$$(xcrun swift --version 2>/dev/null | head -1 || echo unknown)"
 	@echo "fortweb-dir=$(FORTWEB_DIR)"
-	@echo "payload-present=$$([ -d WebPayload/fortweb ] && echo yes || echo no)"
-	@echo "payload-valid=$$([ -f WebPayload/build-manifest.json ] && echo yes || echo no)"
-	@if [ -f WebPayload/build-manifest.json ]; then \
-	  python3 -c "import json; m=json.load(open('WebPayload/build-manifest.json')); print('payload-producer='+m.get('producer','unknown')); print('payload-git-sha='+m.get('git_sha',m.get('dist_tree_sha256','unknown'))[:16])" 2>/dev/null || true; \
+	@echo "payload-present=$$([ -f WebPayload/manifest.json ] && echo yes || echo no)"
+	@if [ -f WebPayload/manifest.json ]; then \
+	  python3 -c "import json; m=json.load(open('WebPayload/manifest.json')); print('payload-producer='+m.get('producer','unknown')); print('payload-sha='+str(m.get('fortweb_commit_sha','unknown'))[:16])" 2>/dev/null || true; \
 	fi
 	@if [ "$$(SIMULATOR_UDID)" != "" ] || [ "$$(SIMULATOR_NAME)" != "" ] || [ "$$(SIMULATOR_OS)" != "" ]; then \
 	  echo "INFO: Using explicit simulator override"; \
@@ -137,9 +118,9 @@ ios-doctor: ## Verify Xcode, simulator, and payload-source readiness
 	    python3 scripts/resolve-ios-simulator.py; \
 	fi
 	@xcrun devicectl list devices >/dev/null 2>&1 || echo "WARNING: no physical device available via CoreDevice"
-	@if [ ! -d WebPayload/fortweb ]; then \
+	@if [ ! -f WebPayload/manifest.json ]; then \
 	  echo "ERROR: WebPayload is missing."; \
-	  echo "Run: make xcode-ready FORTWEB_DIR=../FortWeb"; \
+	  echo "Run: make xcode-ready FORTWEB_DIR=<FortWeb #38 checkout>"; \
 	fi
 
 xcode-ready: ## Prepare the repository for opening in Xcode (press Play after)
@@ -151,10 +132,10 @@ xcode-ready: ## Prepare the repository for opening in Xcode (press Play after)
 	  python3 scripts/resolve-ios-simulator.py || (echo "ERROR: No compatible iPhone Simulator is installed."; echo "Open Xcode > Settings > Components and install an iOS Simulator runtime."; exit 1)
 	@echo ""
 	@echo "=== Syncing payload ==="
-	@if [ -d WebPayload/fortweb ]; then \
+	@if [ -f WebPayload/manifest.json ]; then \
 	  echo "Payload already staged. Use FORTWEB_DIR to re-sync if needed."; \
 	else \
-	  PAYLOAD_SOURCE=$(PAYLOAD_SOURCE) FORTWEB_DIR=$(FORTWEB_DIR) ./sync-payload.sh; \
+	  $(MAKE) payload-import FORTWEB_DIR=$(FORTWEB_DIR); \
 	fi
 	@echo ""
 	@echo "=== Validating payload ==="
@@ -162,13 +143,10 @@ xcode-ready: ## Prepare the repository for opening in Xcode (press Play after)
 	@echo ""
 	@echo "=== Checking bridge contract ==="
 	@npm run bridge:check
-	@echo ""
-	@echo "=== TypeScript type checking ==="
-	@npm run typecheck
 	@if [ "$(XCODE_READY_TESTS)" = "1" ]; then \
 	  echo ""; \
-	  echo "=== Running TypeScript unit tests ==="; \
-	  npm run test; \
+	  echo "=== Running Node tool tests ==="; \
+	  npm test; \
 	fi
 	@echo ""
 	@echo "=== Ready ==="
@@ -176,8 +154,6 @@ xcode-ready: ## Prepare the repository for opening in Xcode (press Play after)
 	@echo "Open with: make open"
 	@SIMULATOR_UDID="$(SIMULATOR_UDID)" SIMULATOR_NAME="$(SIMULATOR_NAME)" SIMULATOR_OS="$(SIMULATOR_OS)" \
 	  python3 scripts/resolve-ios-simulator.py 2>/dev/null || true
-
-dev-sim: sync check-contract lint-ts test-ts build ## Sync payload, run TS checks, and build for Simulator
 
 run-sim: ## Boot, install, and launch on the resolved Simulator
 	@if [ "$(SIM_UDID)" = "SIM_UNRESOLVED" ]; then \
@@ -191,7 +167,7 @@ run-sim: ## Boot, install, and launch on the resolved Simulator
 	xcrun simctl install "$(SIM_UDID)" "$(SIM_APP_PATH)"
 	xcrun simctl launch "$(SIM_UDID)" $(APP_BUNDLE_ID)
 
-dev-device: sync ## Sync payload and build for a generic iOS device output
+dev-device: payload-import ## Import canonical payload and build for a generic iOS device output
 	xcodebuild build \
 	  -project $(XCODE_PROJECT) \
 	  -scheme $(SCHEME) \
@@ -218,10 +194,11 @@ parity-smoke: ## Run the shared payload through simulator then device (requires 
 	  echo "ERROR: Could not resolve a simulator."; \
 	  exit 1; \
 	fi
-	$(MAKE) dev-sim PAYLOAD_SOURCE=$(PAYLOAD_SOURCE) FORTWEB_DIR=$(FORTWEB_DIR)
-	$(MAKE) run-sim PAYLOAD_SOURCE=$(PAYLOAD_SOURCE) FORTWEB_DIR=$(FORTWEB_DIR)
-	$(MAKE) dev-device PAYLOAD_SOURCE=$(PAYLOAD_SOURCE) FORTWEB_DIR=$(FORTWEB_DIR)
-	$(MAKE) run-device PAYLOAD_SOURCE=$(PAYLOAD_SOURCE) FORTWEB_DIR=$(FORTWEB_DIR) DEVICE_REF="$(DEVICE_REF)"
+	$(MAKE) payload-import FORTWEB_DIR=$(FORTWEB_DIR)
+	$(MAKE) build FORTWEB_DIR=$(FORTWEB_DIR)
+	$(MAKE) run-sim
+	$(MAKE) dev-device FORTWEB_DIR=$(FORTWEB_DIR)
+	$(MAKE) run-device DEVICE_REF="$(DEVICE_REF)"
 
 logs-sim: ## Show recent simulator logs for KeriWallet
 	@if [ "$(SIM_UDID)" = "SIM_UNRESOLVED" ]; then \
@@ -275,7 +252,7 @@ test-swift-run: ## Run pre-built Swift tests (simulator must be resolved)
 
 test-swift: test-swift-build test-swift-run ## Build then run Swift unit + UI tests on iOS Simulator
 
-test-all: test-swift test-ts test-e2e ## Run Swift + TS + E2E tests
+test-all: test-swift test-tools ## Run Swift + Node tool tests
 
 open: ## Open KeriWallet.xcodeproj in Xcode
 	open $(XCODE_PROJECT)
@@ -285,12 +262,8 @@ lint: ## Run SwiftLint on all Swift sources (--strict)
 
 generated-check: ## Verify generated bridge contracts are current and deterministic
 	npm run bridge:check
-	@test -f src/bridge-contract.ts || (echo "ERROR: src/bridge-contract.ts missing" && exit 1)
 	@test -f KeriWallet/BridgeContract.swift || (echo "ERROR: BridgeContract.swift missing" && exit 1)
 	@test -f generated/BridgeContract.kt || (echo "ERROR: BridgeContract.kt missing" && exit 1)
-
-knip: ## Run Knip unused-code analysis
-	npm run knip
 
 # ── Cleanup targets ───────────────────────────────────────────────────────────
 
@@ -302,17 +275,12 @@ clean: ## Remove build artifacts, caches, and temporary output (safe daily clean
 	find . -type d -name .pytest_cache -exec rm -rf {} + 2>/dev/null || true
 	rm -rf test-results
 
-clean-payload: ## Remove staged mobile payload (regenerate with make xcode-ready)
+clean-payload: ## Remove staged mobile payload (regenerate with make payload-contract)
 	@echo "Removing WebPayload/ ..."
 	rm -rf WebPayload
-	@echo "Regenerate: make xcode-ready FORTWEB_DIR=../FortWeb"
+	@echo "Regenerate: make payload-contract FORTWEB_DIR=<FortWeb #38 checkout>"
 
-clean-runtime: ## Remove downloaded Pyodide runtime (regenerate with make pyodide)
-	@echo "Removing public/pyodide/ ..."
-	rm -rf public/pyodide
-	@echo "Regenerate: make pyodide"
-
-clean-all: clean clean-payload clean-runtime ## Full developer reset (preserves source, .git, node_modules)
+clean-all: clean clean-payload ## Full developer reset (preserves source, .git, node_modules)
 
 # ── Diagnostics ───────────────────────────────────────────────────────────────
 
@@ -329,10 +297,10 @@ doctor: ## Report environment state without mutation
 	@echo ""
 	@echo "=== FortWeb ==="
 	@echo "FORTWEB_DIR: $(FORTWEB_DIR)"
-	@echo "Payload present: $$([ -d WebPayload/fortweb ] && echo yes || echo no)"
+	@echo "Payload present: $$([ -f WebPayload/manifest.json ] && echo yes || echo no)"
 	@echo "Payload valid: $$(node tools/validate-mobile-payload.mjs --payload-dir WebPayload --target ios-webpayload 2>/dev/null | grep result || echo unknown)"
 	@echo ""
-	@echo "=== TypeScript ==="
+	@echo "=== Node tooling ==="
 	@echo "Node: $$(node --version 2>/dev/null || echo unknown)"
 	@echo "npm: $$(npm --version 2>/dev/null || echo unknown)"
 	@echo "Bridge: $$(node tools/gen-bridge-contract.mjs --check 2>/dev/null | tail -1 || echo unknown)"
@@ -340,16 +308,13 @@ doctor: ## Report environment state without mutation
 	@echo "=== SwiftLint ==="
 	@command -v swiftlint >/dev/null && swiftlint version 2>/dev/null || echo "  not installed"
 	@echo ""
-	@echo "=== Pyodide ==="
-	@echo "Pyodide present: $$([ -d public/pyodide ] && echo yes || echo 'no (run make pyodide)')"
-	@echo ""
 	@echo "=== Git ==="
 	@echo "Branch: $$(git branch --show-current 2>/dev/null)"
 	@echo "Dirty: $$(git status --short 2>/dev/null | grep -v '^??' | head -5 || echo clean)"
 
 # ── TestFlight targets ────────────────────────────────────────────────────────
 
-archive: sync ## Archive KeriWallet for App Store (Release)
+archive: payload-import ## Archive KeriWallet for App Store (Release)
 	xcodebuild archive \
 	  -project $(XCODE_PROJECT) \
 	  -scheme $(SCHEME) \

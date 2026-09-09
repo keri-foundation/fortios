@@ -65,7 +65,7 @@ async function derivePyodideContract(payloadDir) {
   const pyodideData = pyodideFiles.find(f => f.path.endsWith('pyodide.asm.data'));
   const pyodideWasm = pyodideFiles.find(f => f.path.endsWith('pyodide.asm.wasm'));
 
-  // 4. Extract version from the path (e.g., vendor/pyodide/0.29.3/pyodide.mjs)
+  // 4. Extract version from the path (e.g., vendor/pyodide/314.0.5/pyodide.mjs)
   const versionMatch = pyodideJs?.path?.match(/pyodide\/([^/]+)\//);
   const derivedVersion = versionMatch ? versionMatch[1] : null;
 

@@ -11,7 +11,6 @@ const testDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(testDir, '..', '..');
 const assertNoProofDemoShellScript = path.join(repoRoot, 'tools', 'assert-no-proof-demo-shell.mjs');
 const validateMobilePayloadScript = path.join(repoRoot, 'tools', 'validate-mobile-payload.mjs');
-const fortwebManifestScript = path.join(repoRoot, 'tools', 'gen-fortweb-bundle-manifest.mjs');
 const tempDirs = [];
 
 async function makeTempDir() {
@@ -201,155 +200,6 @@ describe('assert-no-proof-demo-shell.mjs', () => {
     });
 });
 
-describe('gen-fortweb-bundle-manifest.mjs', () => {
-    it('writes the expected wrapper manifest fields for the FortWeb payload', async () => {
-        const payloadRoot = await makeTempDir();
-        const fortwebDir = await makeTempDir();
-
-        await writeTextFile(path.join(payloadRoot, 'index.html'), '<!doctype html>\n');
-        await writeTextFile(path.join(payloadRoot, 'fortweb', 'app', 'index.html'), '<main>fortweb</main>\n');
-        await writeTextFile(
-            path.join(fortwebDir, 'pyscript-ci.toml'),
-            'interpreter = "/fortweb/vendor/pyodide/custom.mjs"\n'
-        );
-
-        await runNodeScript(fortwebManifestScript, [
-            '--payload-root',
-            payloadRoot,
-            '--fortweb-dir',
-            fortwebDir,
-            '--build-command',
-            'PAYLOAD_SOURCE=fortweb ./sync-payload.sh',
-        ]);
-
-        const manifest = JSON.parse(
-            await readFile(path.join(payloadRoot, 'build-manifest.json'), 'utf8')
-        );
-
-        expect(manifest.producer).toBe('fortweb-shared');
-        expect(manifest.payload_profile).toBe('product-shell');
-        expect(manifest.entry_document).toBe('fortweb/app/index.html');
-        expect(manifest.pyodide_asset_path).toBe('/fortweb/vendor/pyodide/custom.mjs');
-        expect(manifest.sync_targets.map((entry) => entry.id)).toEqual(['ios-webpayload']);
-    });
-});
-
-// --------------------------------------------------------------------------
-// Bridge contract generator: export-visibility regression test
-// --------------------------------------------------------------------------
-
-describe('gen-bridge-contract.mjs exports', () => {
-    const genScript = path.join(repoRoot, 'tools', 'gen-bridge-contract.mjs');
-    const contractSource = path.join(repoRoot, 'bridge-contract.json');
-
-    const ALLOWED_EXPORTS = Object.freeze([
-        'BRIDGE_HANDLER_NAME',
-        'BRIDGE_MESSAGE_TYPES',
-        'WORKER_COMMAND_TYPES',
-        'WORKER_RESULT_TYPES',
-    ]);
-
-    /** Set up a scratch dir that mimics the repo layout so the generator
-     *  resolves its fixed relative paths (bridge-contract.json, src/, KeriWallet/, generated/).
-     *  The generator uses resolve(__dirname, '..') for ROOT, so we place it in
-     *  a tools/ subdir. */
-    async function setupGenSandbox() {
-        const workDir = await makeTempDir();
-        const toolsDir = path.join(workDir, 'tools');
-        const genFile = path.join(toolsDir, 'gen-bridge-contract.mjs');
-        const contractFile = path.join(workDir, 'bridge-contract.json');
-        const srcDir = path.join(workDir, 'src');
-        const tsOut = path.join(srcDir, 'bridge-contract.ts');
-        await mkdir(toolsDir);
-        await mkdir(srcDir);
-        // Foundation output paths (not the donor's xcodeproj layout)
-        await mkdir(path.join(workDir, 'KeriWallet'), { recursive: true });
-        await mkdir(path.join(workDir, 'generated'));
-        await writeFile(genFile, await readFile(genScript, 'utf8'));
-        await writeFile(contractFile, await readFile(contractSource, 'utf8'));
-        return { workDir, genFile, tsOut };
-    }
-
-    async function runGen(workDir, genFile) {
-        await execFile('node', [genFile], { cwd: workDir, encoding: 'utf8' });
-    }
-
-    it('produces exactly 4 public const exports', async () => {
-        const { workDir, genFile, tsOut } = await setupGenSandbox();
-        await runGen(workDir, genFile);
-
-        const output = await readFile(tsOut, 'utf8');
-
-        // 4 public exports — no more, no fewer
-        const exportLines = output
-            .split('\n')
-            .filter((line) => /^export const /.test(line));
-        expect(exportLines).toHaveLength(4);
-        expect(exportLines[0]).toMatch(/^export const BRIDGE_HANDLER_NAME = /);
-        expect(exportLines[1]).toMatch(/^export const BRIDGE_MESSAGE_TYPES = /);
-        expect(exportLines[2]).toMatch(/^export const WORKER_COMMAND_TYPES = /);
-        expect(exportLines[3]).toMatch(/^export const WORKER_RESULT_TYPES = /);
-    });
-
-    it('does not export individual string scalars', async () => {
-        const { workDir, genFile, tsOut } = await setupGenSandbox();
-        await runGen(workDir, genFile);
-
-        const output = await readFile(tsOut, 'utf8');
-
-        // These individual string scalars should NOT be exported (they
-        // are used privately to build the array exports above).
-        const forbiddenExports = [
-            'BRIDGE_CONTRACT_VERSION',
-            'BRIDGE_HANDLER_SOURCE_SWIFT',
-            'BRIDGE_HANDLER_SOURCE_KOTLIN',
-            'LIFECYCLE_BOOT',
-            'BRIDGE_JS_ERROR',
-            'WORKER_CMD_INIT',
-            'WORKER_RES_READY',
-        ];
-        for (const name of forbiddenExports) {
-            expect(output).not.toMatch(
-                new RegExp('^export const ' + name),
-            );
-        }
-
-        // Prove the complete export-name set equals exactly the four
-        // allowed names — accidental extra exports fail automatically.
-        const exportNames = output
-            .split('\n')
-            .filter((line) => /^export const /.test(line))
-            .map((line) => line.match(/^export const (\w+)/)?.[1])
-            .filter(Boolean);
-        expect(new Set(exportNames)).toEqual(new Set(ALLOWED_EXPORTS));
-    });
-
-    it('is idempotent', async () => {
-        const { workDir, genFile } = await setupGenSandbox();
-
-        await runGen(workDir, genFile);
-        const ts1 = await readFile(
-            path.join(workDir, 'src', 'bridge-contract.ts'), 'utf8');
-        const swift1 = await readFile(
-            path.join(workDir, 'KeriWallet', 'BridgeContract.swift'), 'utf8');
-        const kt1 = await readFile(
-            path.join(workDir, 'generated', 'BridgeContract.kt'), 'utf8');
-
-        // Second run should produce identical output for all three languages
-        await runGen(workDir, genFile);
-        const ts2 = await readFile(
-            path.join(workDir, 'src', 'bridge-contract.ts'), 'utf8');
-        const swift2 = await readFile(
-            path.join(workDir, 'KeriWallet', 'BridgeContract.swift'), 'utf8');
-        const kt2 = await readFile(
-            path.join(workDir, 'generated', 'BridgeContract.kt'), 'utf8');
-
-        expect(ts2).toBe(ts1);
-        expect(swift2).toBe(swift1);
-        expect(kt2).toBe(kt1);
-    });
-});
-
 // --- importer tests ---
 
 import { execSync } from 'node:child_process';
@@ -433,9 +283,18 @@ function createTestZip(tempDir, { packageName = 'fortweb-runtime', manifestOverr
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 
-async function importZip(zipPath) {
+/** Create a fresh isolated import destination (never the real repo WebPayload). */
+async function freshImportDest() {
+    const dest = await mkdtemp(path.join(os.tmpdir(), 'fort-ios-import-dest-'));
+    tempDirs.push(dest);
+    return dest;
+}
+
+async function importZip(zipPath, importDest) {
+    const dest = importDest || await freshImportDest();
     return execFile('node', [importScript, zipPath], {
         cwd: repoRoot,
+        env: { ...process.env, FORTWEB_IMPORT_DEST: dest },
         encoding: 'utf8',
     });
 }
@@ -454,12 +313,13 @@ describe('import-fortweb-runtime-package.mjs', () => {
         const tempDir = await makeTempDir();
         const { zipPath } = createTestZip(tempDir);
 
-        const { stdout } = await importZip(zipPath);
+        const dest = await freshImportDest();
+        const { stdout } = await importZip(zipPath, dest);
         expect(stdout).toContain('Import complete');
         expect(stdout).toContain('fortweb-runtime');
 
-        // Verify WebPayload was populated
-        const bp = path.join(repoRoot, 'WebPayload', 'manifest.json');
+        // Verify the isolated import destination was populated
+        const bp = path.join(dest, 'manifest.json');
         const manifestBytes = await readFile(bp, 'utf-8');
         expect(manifestBytes).toContain('fortweb-runtime');
     });
@@ -498,10 +358,11 @@ describe('import-fortweb-runtime-package.mjs', () => {
         const tempDir = await makeTempDir();
         const { zipPath, manifest } = createTestZip(tempDir);
 
-        await importZip(zipPath);
+        const dest = await freshImportDest();
+        await importZip(zipPath, dest);
 
         // Read back the manifest — should match exactly
-        const bp = path.join(repoRoot, 'WebPayload', 'manifest.json');
+        const bp = path.join(dest, 'manifest.json');
         const importedManifest = JSON.parse(await readFile(bp, 'utf-8'));
         expect(importedManifest.schema_version).toBe(manifest.schema_version);
         expect(importedManifest.package_name).toBe(manifest.package_name);
@@ -556,13 +417,14 @@ describe('import-fortweb-runtime-package.mjs', () => {
     });
 
     it('leaves existing WebPayload unchanged on failure', async () => {
-        // First import a valid package
+        // First import a valid package into an isolated destination
+        const dest = await freshImportDest();
         const tempDir1 = await makeTempDir();
         const { zipPath: validZip } = createTestZip(tempDir1);
-        await importZip(validZip);
+        await importZip(validZip, dest);
 
         // Read the current state
-        const bp = path.join(repoRoot, 'WebPayload', 'manifest.json');
+        const bp = path.join(dest, 'manifest.json');
         const beforeManifest = await readFile(bp, 'utf-8');
 
         // Try importing a bad package
@@ -572,12 +434,12 @@ describe('import-fortweb-runtime-package.mjs', () => {
         });
 
         try {
-            await importZip(badZip);
+            await importZip(badZip, dest);
         } catch {
             // Expected
         }
 
-        // Verify WebPayload unchanged
+        // Verify the isolated destination is unchanged
         const afterManifest = await readFile(bp, 'utf-8');
         expect(afterManifest).toBe(beforeManifest);
     });
@@ -696,9 +558,10 @@ describe('runtime package containment — adversarial', () => {
             extraFiles: [{ path: 'unicode.txt', content: specialContent }],
         });
 
-        await importZip(zipPath);
+        const dest = await freshImportDest();
+        await importZip(zipPath, dest);
 
-        const importedPath = path.join(repoRoot, 'WebPayload', 'unicode.txt');
+        const importedPath = path.join(dest, 'unicode.txt');
         const importedContent = await readFile(importedPath, 'utf-8');
         expect(importedContent).toBe(specialContent);
     });
@@ -728,9 +591,10 @@ describe('runtime package containment — adversarial', () => {
         const tempDir = await makeTempDir();
         const { zipPath, manifest } = createTestZip(tempDir);
 
-        await importZip(zipPath);
+        const dest = await freshImportDest();
+        await importZip(zipPath, dest);
 
-        const bp = path.join(repoRoot, 'WebPayload', 'manifest.json');
+        const bp = path.join(dest, 'manifest.json');
         const imported = JSON.parse(await readFile(bp, 'utf-8'));
 
         // All 8 required string fields must be present with correct types

@@ -1,6 +1,6 @@
 {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "$comment": "Single source of truth for JS ↔ Swift bridge constants. Run `node tools/gen-bridge-contract.mjs` to regenerate BridgeContract.swift and src/bridge-contract.ts.",
+    "$comment": "Single source of truth for the native bridge constants. Run `node tools/gen-bridge-contract.mjs` to regenerate KeriWallet/BridgeContract.swift and generated/BridgeContract.kt.",
     "version": "1.0",
     "bridge": {
         "handlerName": "bridge"

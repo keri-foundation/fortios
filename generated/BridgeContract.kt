@@ -3,7 +3,7 @@
 // Regenerate: node tools/gen-bridge-contract.mjs
 //
 // This file provides the cross-language bridge constants for Android.
-// Values here must match the TypeScript side (src/bridge-contract.ts) exactly.
+// Values here must match the Swift-side bridge constants exactly.
 
 package org.kerifoundation.fort.bridge
 

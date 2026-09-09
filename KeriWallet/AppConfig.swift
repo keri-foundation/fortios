@@ -68,7 +68,8 @@ enum AppConfig {
     // MARK: - Bundled Web Payload
 
     enum Payload {
-        /// Bundle subdirectory containing the Vite `dist/` output (synced by `sync-payload.sh`).
+        /// Bundle subdirectory containing the canonical FortWeb runtime package
+        /// (imported into `WebPayload/` by `make payload-import`).
         static let bundleSubdirectory = "WebPayload"
         /// Wrapper payload provenance expected by the native host.
         static let requiredProducer = "fortweb"

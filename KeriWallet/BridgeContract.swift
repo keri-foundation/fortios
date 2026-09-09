@@ -3,7 +3,7 @@
 // Regenerate: node tools/gen-bridge-contract.mjs
 //
 // This file provides the cross-language bridge constants. Values here must
-// match the TypeScript side (src/bridge-contract.ts) exactly.
+// Bridge constants must match the JS-visible bridge surface exactly.
 
 import Foundation
 

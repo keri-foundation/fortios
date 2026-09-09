@@ -7,25 +7,18 @@ on:
   pull_request:
     paths:
       - '.github/workflows/ios-security.yml'
-      - '.github/workflows/ios-pyodide-slow.yml'
       - '.tool-versions'
       - 'Makefile'
       - 'README.md'
       - 'bridge-contract.json'
-      - 'build-payload.sh'
-      - 'sync-payload.sh'
       - 'package.json'
       - 'package-lock.json'
-      - 'tsconfig.json'
-      - 'playwright.config.ts'
-      - 'vite.config.ts'
       - 'vitest.config.ts'
-      - 'src/**'
-      - 'playwright/**'
       - 'tools/**'
       - 'KeriWallet/**'
       - 'KeriWalletTests/**'
       - 'KeriWalletUITests/**'
+      - 'generated/**'
       - 'Config/**'
       - 'xcodeproj/**'
   push:
@@ -33,25 +26,18 @@ on:
       - main
     paths:
       - '.github/workflows/ios-security.yml'
-      - '.github/workflows/ios-pyodide-slow.yml'
       - '.tool-versions'
       - 'Makefile'
       - 'README.md'
       - 'bridge-contract.json'
-      - 'build-payload.sh'
-      - 'sync-payload.sh'
       - 'package.json'
       - 'package-lock.json'
-      - 'tsconfig.json'
-      - 'playwright.config.ts'
-      - 'vite.config.ts'
       - 'vitest.config.ts'
-      - 'src/**'
-      - 'playwright/**'
       - 'tools/**'
       - 'KeriWallet/**'
       - 'KeriWalletTests/**'
       - 'KeriWalletUITests/**'
+      - 'generated/**'
       - 'Config/**'
       - 'xcodeproj/**'
   workflow_dispatch:
@@ -61,6 +47,10 @@ jobs:
     runs-on: ubuntu-latest
     env:
       FORTWEB_DIR: ${{ github.workspace }}/.deps/fortweb
+      FORTWEB_RUNTIME_SOURCE_URL: https://github.com/keri-foundation/fortweb/releases/download/runtime-source-pyodide-314-20260909/runtime-source.tar.gz
+      FORTWEB_RUNTIME_SOURCE_ARCHIVE_SHA256: e04833249eec88596e0f2f88d32baa6d5fae6b2e964996587061ddac4bd78c72
+      FORTWEB_RUNTIME_SOURCE_MANIFEST: build/runtime-source/manifest.json
+      FORTWEB_RUNTIME_SOURCE_MANIFEST_SHA256: 87bcc689d7778840a76284471ff599cef21be41df2b429724f7f4fdc5f022135
 
     steps:
       - name: Check out repository
@@ -72,7 +62,7 @@ jobs:
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
         with:
           repository: keri-foundation/fortweb
-          ref: e079701a337468acb1484a1c2cf86acc517d8464
+          ref: bdb81afa7593603141e8db306f0636a583d2db02
           path: .deps/fortweb
 
       - name: Set up Node
@@ -84,17 +74,26 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build FortWeb runtime
+      - name: Build canonical FortWeb runtime
         run: |
           npm ci --prefix "$FORTWEB_DIR"
-          npm run build:runtime --prefix "$FORTWEB_DIR"
-          test -f "$FORTWEB_DIR/dist/runtime/app/app/main.js"
+          (cd "$FORTWEB_DIR" && python3 scripts/acquire_runtime_source.py \
+            --url "$FORTWEB_RUNTIME_SOURCE_URL" \
+            --sha256 "$FORTWEB_RUNTIME_SOURCE_ARCHIVE_SHA256" \
+            --manifest-sha256 "$FORTWEB_RUNTIME_SOURCE_MANIFEST_SHA256" \
+            --output build/runtime-source)
+          python3 -m pip install --disable-pip-version-check --no-index --no-deps \
+            "$FORTWEB_DIR/build/runtime-source/wheelhouse/packaging-26.1-py3-none-any.whl" \
+            "$FORTWEB_DIR/build/runtime-source/wheelhouse/setuptools-83.0.0-py3-none-any.whl" \
+            "$FORTWEB_DIR/build/runtime-source/wheelhouse/wheel-0.47.0-py3-none-any.whl"
+          (cd "$FORTWEB_DIR" && npm run build:runtime && \
+            FORTWEB_RUNTIME_SOURCE_MANIFEST="$FORTWEB_RUNTIME_SOURCE_MANIFEST" \
+            FORTWEB_RUNTIME_SOURCE_MANIFEST_SHA256="$FORTWEB_RUNTIME_SOURCE_MANIFEST_SHA256" \
+            npm run package:runtime -- --runtime-dir dist/runtime --python python3 --output-dir dist/package)
+          test -f "$FORTWEB_DIR/dist/package/fortweb-runtime-0.0.0.zip"
 
       - name: Verify bridge contract output
         run: make bridge-check
-
-      - name: Run TypeScript checks
-        run: npm run typecheck
 
       - name: Enforce wrapper payload contract
         run: make payload-contract
@@ -111,14 +110,8 @@ jobs:
       - name: Test runtime requirements compatibility
         run: npm run test:runtime-requirements-compatibility
 
-      - name: Run TypeScript unit tests
-        run: make test-ts
-
-      - name: Install Playwright browser
-        run: npx playwright install --with-deps chromium
-
-      - name: Run fast Playwright smoke tests
-        run: make test-e2e
+      - name: Run Node tool tests (Vitest)
+        run: make test-tools
 
   swift-tests:
     runs-on: macos-26
@@ -126,6 +119,10 @@ jobs:
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.5.app/Contents/Developer
       FORTWEB_DIR: ${{ github.workspace }}/.deps/fortweb
+      FORTWEB_RUNTIME_SOURCE_URL: https://github.com/keri-foundation/fortweb/releases/download/runtime-source-pyodide-314-20260909/runtime-source.tar.gz
+      FORTWEB_RUNTIME_SOURCE_ARCHIVE_SHA256: e04833249eec88596e0f2f88d32baa6d5fae6b2e964996587061ddac4bd78c72
+      FORTWEB_RUNTIME_SOURCE_MANIFEST: build/runtime-source/manifest.json
+      FORTWEB_RUNTIME_SOURCE_MANIFEST_SHA256: 87bcc689d7778840a76284471ff599cef21be41df2b429724f7f4fdc5f022135
       SIMULATOR_NAME: 'iPhone 17 Pro'
       SIMULATOR_OS: '26.5'
       RESULT_BUNDLE_PATH: build/TestResults.xcresult
@@ -138,7 +135,7 @@ jobs:
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
         with:
           repository: keri-foundation/fortweb
-          ref: e079701a337468acb1484a1c2cf86acc517d8464
+          ref: bdb81afa7593603141e8db306f0636a583d2db02
           path: .deps/fortweb
 
       - name: Set up Node
@@ -150,11 +147,23 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build FortWeb runtime
+      - name: Build canonical FortWeb runtime
         run: |
           npm ci --prefix "$FORTWEB_DIR"
-          npm run build:runtime --prefix "$FORTWEB_DIR"
-          test -f "$FORTWEB_DIR/dist/runtime/app/app/main.js"
+          (cd "$FORTWEB_DIR" && python3 scripts/acquire_runtime_source.py \
+            --url "$FORTWEB_RUNTIME_SOURCE_URL" \
+            --sha256 "$FORTWEB_RUNTIME_SOURCE_ARCHIVE_SHA256" \
+            --manifest-sha256 "$FORTWEB_RUNTIME_SOURCE_MANIFEST_SHA256" \
+            --output build/runtime-source)
+          python3 -m pip install --disable-pip-version-check --no-index --no-deps \
+            "$FORTWEB_DIR/build/runtime-source/wheelhouse/packaging-26.1-py3-none-any.whl" \
+            "$FORTWEB_DIR/build/runtime-source/wheelhouse/setuptools-83.0.0-py3-none-any.whl" \
+            "$FORTWEB_DIR/build/runtime-source/wheelhouse/wheel-0.47.0-py3-none-any.whl"
+          (cd "$FORTWEB_DIR" && npm run build:runtime && \
+            FORTWEB_RUNTIME_SOURCE_MANIFEST="$FORTWEB_RUNTIME_SOURCE_MANIFEST" \
+            FORTWEB_RUNTIME_SOURCE_MANIFEST_SHA256="$FORTWEB_RUNTIME_SOURCE_MANIFEST_SHA256" \
+            npm run package:runtime -- --runtime-dir dist/runtime --python python3 --output-dir dist/package)
+          test -f "$FORTWEB_DIR/dist/package/fortweb-runtime-0.0.0.zip"
 
       - name: Enforce wrapper payload contract
         run: make payload-contract
@@ -226,6 +235,10 @@ jobs:
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.5.app/Contents/Developer
       FORTWEB_DIR: ${{ github.workspace }}/.deps/fortweb
+      FORTWEB_RUNTIME_SOURCE_URL: https://github.com/keri-foundation/fortweb/releases/download/runtime-source-pyodide-314-20260909/runtime-source.tar.gz
+      FORTWEB_RUNTIME_SOURCE_ARCHIVE_SHA256: e04833249eec88596e0f2f88d32baa6d5fae6b2e964996587061ddac4bd78c72
+      FORTWEB_RUNTIME_SOURCE_MANIFEST: build/runtime-source/manifest.json
+      FORTWEB_RUNTIME_SOURCE_MANIFEST_SHA256: 87bcc689d7778840a76284471ff599cef21be41df2b429724f7f4fdc5f022135
 
     steps:
       - name: Check out repository
@@ -237,7 +250,7 @@ jobs:
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
         with:
           repository: keri-foundation/fortweb
-          ref: e079701a337468acb1484a1c2cf86acc517d8464
+          ref: bdb81afa7593603141e8db306f0636a583d2db02
           path: .deps/fortweb
 
       - name: Set up Node
@@ -249,11 +262,23 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build FortWeb runtime
+      - name: Build canonical FortWeb runtime
         run: |
           npm ci --prefix "$FORTWEB_DIR"
-          npm run build:runtime --prefix "$FORTWEB_DIR"
-          test -f "$FORTWEB_DIR/dist/runtime/app/app/main.js"
+          (cd "$FORTWEB_DIR" && python3 scripts/acquire_runtime_source.py \
+            --url "$FORTWEB_RUNTIME_SOURCE_URL" \
+            --sha256 "$FORTWEB_RUNTIME_SOURCE_ARCHIVE_SHA256" \
+            --manifest-sha256 "$FORTWEB_RUNTIME_SOURCE_MANIFEST_SHA256" \
+            --output build/runtime-source)
+          python3 -m pip install --disable-pip-version-check --no-index --no-deps \
+            "$FORTWEB_DIR/build/runtime-source/wheelhouse/packaging-26.1-py3-none-any.whl" \
+            "$FORTWEB_DIR/build/runtime-source/wheelhouse/setuptools-83.0.0-py3-none-any.whl" \
+            "$FORTWEB_DIR/build/runtime-source/wheelhouse/wheel-0.47.0-py3-none-any.whl"
+          (cd "$FORTWEB_DIR" && npm run build:runtime && \
+            FORTWEB_RUNTIME_SOURCE_MANIFEST="$FORTWEB_RUNTIME_SOURCE_MANIFEST" \
+            FORTWEB_RUNTIME_SOURCE_MANIFEST_SHA256="$FORTWEB_RUNTIME_SOURCE_MANIFEST_SHA256" \
+            npm run package:runtime -- --runtime-dir dist/runtime --python python3 --output-dir dist/package)
+          test -f "$FORTWEB_DIR/dist/package/fortweb-runtime-0.0.0.zip"
 
       - name: Enforce wrapper payload contract (import + validate)
         run: make payload-contract

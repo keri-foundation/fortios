@@ -1,21 +1,23 @@
 {
+  // Minimal project-boundary config for Fort-ios (post harness-retirement).
+  // Fort-ios owns: native wrapper (KeriWallet), tests, and Node tooling (tools/).
+  // It does NOT own the bundled FortWeb runtime: WebPayload/ is an imported,
+  // versioned artifact and the importer's atomic staging siblings
+  // (.WebPayload-new-*/ .WebPayload-old-*/) are transient — never analyze them.
   "entry": [
-    "src/main.ts",
-    "src/pyodide_worker.ts",
+    // Direct-exec CLI validators invoked from the Makefile / GitHub Actions
+    // (not from package.json scripts, so Knip cannot infer them automatically).
     "tools/assert-no-proof-demo-shell.mjs",
-    "tools/gen-fortweb-bundle-manifest.mjs",
     "tools/validate-mobile-payload.mjs"
   ],
   "project": [
-    "src/**/*.{ts,tsx}",
-    "playwright/**/*.{ts,tsx}",
-    "tools/**/*.{js,mjs,ts}",
-    "*.{js,mjs,ts}",
+    "**/*.{js,mjs,cjs,ts}",
     "!WebPayload/**",
-    "!public/pyodide/**",
+    "!.WebPayload-new-*/**",
+    "!.WebPayload-old-*/**",
     "!build/**",
+    "!DerivedData/**",
     "!dist/**",
-    "!test-results/**",
     "!node_modules/**"
   ]
 }

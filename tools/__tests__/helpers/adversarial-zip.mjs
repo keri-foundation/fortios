@@ -22,8 +22,10 @@ import path from 'node:path';
  * @param {string} pythonCode - Python code string (receives zip_path, content_dir)
  * @param {object} [contentFiles] - map of relative-path → content to pre-create
  * @returns {string} absolute path to the created ZIP
+ *
+ * @private — module-internal base factory used by the exported helpers below.
  */
-export function createAdversarialZip(tempDir, zipName, pythonCode, contentFiles = {}) {
+function createAdversarialZip(tempDir, zipName, pythonCode, contentFiles = {}) {
   const zipPath = path.join(tempDir, zipName);
   const contentDir = path.join(tempDir, 'content');
   mkdirSync(contentDir, { recursive: true });
