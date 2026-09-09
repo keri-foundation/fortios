@@ -51,6 +51,7 @@ jobs:
       FORTWEB_RUNTIME_SOURCE_ARCHIVE_SHA256: e04833249eec88596e0f2f88d32baa6d5fae6b2e964996587061ddac4bd78c72
       FORTWEB_RUNTIME_SOURCE_MANIFEST: build/runtime-source/manifest.json
       FORTWEB_RUNTIME_SOURCE_MANIFEST_SHA256: 87bcc689d7778840a76284471ff599cef21be41df2b429724f7f4fdc5f022135
+      FORTWEB_PACKAGE_REF: refs/heads/pyodide-314-runtime
 
     steps:
       - name: Check out repository
@@ -94,7 +95,7 @@ jobs:
           (cd "$FORTWEB_DIR" && npm run build:runtime && \
             FORTWEB_RUNTIME_SOURCE_MANIFEST="$FORTWEB_RUNTIME_SOURCE_MANIFEST" \
             FORTWEB_RUNTIME_SOURCE_MANIFEST_SHA256="$FORTWEB_RUNTIME_SOURCE_MANIFEST_SHA256" \
-            npm run package:runtime -- --runtime-dir dist/runtime --python python3 --output-dir dist/package)
+            npm run package:runtime -- --runtime-dir dist/runtime --python python3 --output-dir dist/package --ref "$FORTWEB_PACKAGE_REF")
           test -f "$FORTWEB_DIR/dist/package/fortweb-runtime-0.0.0.zip"
 
       - name: Verify bridge contract output
@@ -128,6 +129,7 @@ jobs:
       FORTWEB_RUNTIME_SOURCE_ARCHIVE_SHA256: e04833249eec88596e0f2f88d32baa6d5fae6b2e964996587061ddac4bd78c72
       FORTWEB_RUNTIME_SOURCE_MANIFEST: build/runtime-source/manifest.json
       FORTWEB_RUNTIME_SOURCE_MANIFEST_SHA256: 87bcc689d7778840a76284471ff599cef21be41df2b429724f7f4fdc5f022135
+      FORTWEB_PACKAGE_REF: refs/heads/pyodide-314-runtime
       SIMULATOR_NAME: 'iPhone 17 Pro'
       SIMULATOR_OS: '26.5'
       RESULT_BUNDLE_PATH: build/TestResults.xcresult
@@ -172,7 +174,7 @@ jobs:
           (cd "$FORTWEB_DIR" && npm run build:runtime && \
             FORTWEB_RUNTIME_SOURCE_MANIFEST="$FORTWEB_RUNTIME_SOURCE_MANIFEST" \
             FORTWEB_RUNTIME_SOURCE_MANIFEST_SHA256="$FORTWEB_RUNTIME_SOURCE_MANIFEST_SHA256" \
-            npm run package:runtime -- --runtime-dir dist/runtime --python python3 --output-dir dist/package)
+            npm run package:runtime -- --runtime-dir dist/runtime --python python3 --output-dir dist/package --ref "$FORTWEB_PACKAGE_REF")
           test -f "$FORTWEB_DIR/dist/package/fortweb-runtime-0.0.0.zip"
 
       - name: Enforce wrapper payload contract
@@ -249,6 +251,7 @@ jobs:
       FORTWEB_RUNTIME_SOURCE_ARCHIVE_SHA256: e04833249eec88596e0f2f88d32baa6d5fae6b2e964996587061ddac4bd78c72
       FORTWEB_RUNTIME_SOURCE_MANIFEST: build/runtime-source/manifest.json
       FORTWEB_RUNTIME_SOURCE_MANIFEST_SHA256: 87bcc689d7778840a76284471ff599cef21be41df2b429724f7f4fdc5f022135
+      FORTWEB_PACKAGE_REF: refs/heads/pyodide-314-runtime
 
     steps:
       - name: Check out repository
@@ -292,7 +295,7 @@ jobs:
           (cd "$FORTWEB_DIR" && npm run build:runtime && \
             FORTWEB_RUNTIME_SOURCE_MANIFEST="$FORTWEB_RUNTIME_SOURCE_MANIFEST" \
             FORTWEB_RUNTIME_SOURCE_MANIFEST_SHA256="$FORTWEB_RUNTIME_SOURCE_MANIFEST_SHA256" \
-            npm run package:runtime -- --runtime-dir dist/runtime --python python3 --output-dir dist/package)
+            npm run package:runtime -- --runtime-dir dist/runtime --python python3 --output-dir dist/package --ref "$FORTWEB_PACKAGE_REF")
           test -f "$FORTWEB_DIR/dist/package/fortweb-runtime-0.0.0.zip"
 
       - name: Enforce wrapper payload contract (import + validate)
