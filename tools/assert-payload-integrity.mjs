@@ -178,7 +178,10 @@ async function validateNoUnexpectedFiles(payloadDir, manifest) {
   const allFiles = await listFilesRec(payloadDir);
   for (const absPath of allFiles) {
     const relPath = path.relative(payloadDir, absPath);
-    if (!declared.has(relPath) && !relPath.startsWith('.')) {
+    // Complete inventory check against the producer manifest plus the
+    // explicitly wrapper-owned files declared above. There is no dot-prefix
+    // exemption, so an undeclared hidden file is a violation.
+    if (!declared.has(relPath)) {
       errors.push(violation(relPath, 'file not declared in producer manifest', expected));
     }
   }

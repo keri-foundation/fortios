@@ -45,6 +45,37 @@ async function runNodeScriptExpectFailure(scriptPath, args) {
     throw new Error(`Expected ${path.basename(scriptPath)} to fail`);
 }
 
+/**
+ * Aggregate SHA-256 over every file in a directory tree (path + bytes).
+ * Used to prove a failed import leaves the previously staged payload
+ * byte-for-byte unchanged, rather than merely exiting non-zero.
+ */
+async function treeSha256(dir) {
+    const rows = [];
+    async function walk(current, prefix) {
+        let entries;
+        try {
+            entries = await readdir(current, { withFileTypes: true });
+        } catch (e) {
+            if (e.code === 'ENOENT') return;
+            throw e;
+        }
+        for (const entry of entries) {
+            const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+            const full = path.join(current, entry.name);
+            if (entry.isDirectory()) {
+                await walk(full, rel);
+            } else if (entry.isFile()) {
+                const data = await readFile(full);
+                rows.push(`${rel} ${createHash('sha256').update(data).digest('hex')}`);
+            }
+        }
+    }
+    await walk(dir, '');
+    rows.sort();
+    return createHash('sha256').update(rows.join('\n')).digest('hex');
+}
+
 function makeSharedManifest(overrides = {}) {
     return {
         producer: 'fortweb',
@@ -211,7 +242,35 @@ const importScript = path.join(repoRoot, 'tools', 'import-fortweb-runtime-packag
  * FortWeb runtime package format (manifest.json, checksums.sha256).
  * Uses system `zip` command. All fixtures are generated in temp dirs.
  */
-function createTestZip(tempDir, { packageName = 'fortweb-runtime', manifestOverrides = {}, extraFiles = [] } = {}) {
+/**
+ * Write the canonical contracts descriptor the importer requires, in the
+ * shape produced by FortWeb #38. Returns the relative path and body so the
+ * caller can declare it in manifest.files.
+ */
+function writeCanonicalRequirements(pkgDir, { relPath = 'contracts/runtime-requirements.json', overrides = {} } = {}) {
+    const descriptor = {
+        schema: 'fort.runtime-requirements.v1',
+        version: 1,
+        producer: 'fortweb',
+        payload_profile: 'offline-runtime',
+        capabilities: { persistent_storage_partition: { required: true } },
+        forbidden_behaviors: [
+            'network_fetch',
+            'service_worker_registration',
+            'general_purpose_browsing',
+            'localhost_or_loopback_origin',
+            'http_fallback',
+        ],
+        ...overrides,
+    };
+    const body = `${JSON.stringify(descriptor, null, 2)}\n`;
+    const fullPath = path.join(pkgDir, relPath);
+    mkdirSync(path.dirname(fullPath), { recursive: true });
+    writeFileSync(fullPath, body);
+    return { relPath, body };
+}
+
+function createTestZip(tempDir, { packageName = 'fortweb-runtime', manifestOverrides = {}, extraFiles = [], hiddenFiles = [], omitChecksumFile = false, checksumText = null, omitContractsDescriptor = false, contractsText = null, requirementsOverrides = {}, manifestRawText = null, tamperFileAfterManifest = null } = {}) {
     const pkgDir = path.join(tempDir, packageName);
     const zipPath = path.join(tempDir, 'test-package.zip');
 
@@ -225,6 +284,7 @@ function createTestZip(tempDir, { packageName = 'fortweb-runtime', manifestOverr
         fortweb_commit_sha: '0000000000000000000000000000000000000000',
         runtime_origin: 'https://appassets.androidplatform.net',
         entrypoint: 'app/index.html',
+        contracts: { runtime_requirements: { path: 'contracts/runtime-requirements.json' } },
         files: [],
         ...manifestOverrides,
     };
@@ -245,6 +305,40 @@ function createTestZip(tempDir, { packageName = 'fortweb-runtime', manifestOverr
         writeFileSync(efPath, ef.content);
     }
 
+    // Write undeclared files: present in the ZIP but absent from the manifest.
+    // Used to prove the inventory check is complete and carries no dot-prefix
+    // exemption.
+    for (const hf of hiddenFiles) {
+        const hfPath = path.join(pkgDir, hf.path);
+        mkdirSync(path.dirname(hfPath), { recursive: true });
+        writeFileSync(hfPath, hf.content);
+    }
+
+    // Write the declared contracts descriptor (canonical #38 shape). The
+    // manifest points at it and it is part of the declared inventory.
+    const requirementsRel = 'contracts/runtime-requirements.json';
+    const requirementsDescriptor = {
+        schema: 'fort.runtime-requirements.v1',
+        version: 1,
+        producer: 'fortweb',
+        payload_profile: 'offline-runtime',
+        capabilities: { persistent_storage_partition: { required: true } },
+        forbidden_behaviors: [
+            'network_fetch',
+            'service_worker_registration',
+            'general_purpose_browsing',
+            'localhost_or_loopback_origin',
+            'http_fallback',
+        ],
+        ...requirementsOverrides,
+    };
+    const requirementsBody = contractsText ?? `${JSON.stringify(requirementsDescriptor, null, 2)}\n`;
+    if (!omitContractsDescriptor) {
+        const requirementsPath = path.join(pkgDir, requirementsRel);
+        mkdirSync(path.dirname(requirementsPath), { recursive: true });
+        writeFileSync(requirementsPath, requirementsBody);
+    }
+
     // If manifestOverrides.files was explicitly provided, use it; else compute from created files
     if (manifestOverrides.files && Array.isArray(manifestOverrides.files)) {
         // Keep the override — used for testing mismatches
@@ -255,32 +349,52 @@ function createTestZip(tempDir, { packageName = 'fortweb-runtime', manifestOverr
             const efHash = createHash('sha256').update(ef.content).digest('hex');
             manifest.files.push({ path: ef.path, sha256: efHash, bytes: Buffer.byteLength(ef.content) });
         }
+        if (!omitContractsDescriptor) {
+            manifest.files.push({
+                path: requirementsRel,
+                sha256: createHash('sha256').update(requirementsBody).digest('hex'),
+                bytes: Buffer.byteLength(requirementsBody),
+            });
+        }
     }
 
-    // Write manifest
-    const manifestJson = JSON.stringify(manifest, null, 2);
+    // Write manifest. `manifestRawText` lets a test emit a malformed manifest
+    // body without also corrupting the surrounding fixture generation.
+    const manifestJson = manifestRawText ?? JSON.stringify(manifest, null, 2);
     writeFileSync(path.join(pkgDir, 'manifest.json'), manifestJson);
 
-    // Write checksum file
+    // Write checksum file (required package metadata). The canonical FortWeb
+    // contract is a single row covering manifest.json, sha256sum format.
     const manifestHash = createHash('sha256').update(manifestJson).digest('hex');
-    const checksumContent = `${manifestHash}  manifest.json\n`;
-    writeFileSync(path.join(pkgDir, 'checksums.sha256'), checksumContent);
+    const checksumBody = checksumText ?? `${manifestHash}  manifest.json\n`;
+    if (!omitChecksumFile) {
+        writeFileSync(path.join(pkgDir, 'checksums.sha256'), checksumBody);
+    }
 
-    // Create ZIP (run from inside tempDir so paths are relative)
+    // Chain-of-trust tamper: rewrite a declared payload file AFTER the manifest
+    // digest and the manifest checksum were computed. The manifest stays
+    // authentic (checksums.sha256 still covers it) while the payload bytes no
+    // longer match manifest.files[].
+    if (tamperFileAfterManifest) {
+        const tamperPath = path.join(pkgDir, tamperFileAfterManifest.path);
+        writeFileSync(tamperPath, tamperFileAfterManifest.content);
+    }
+
+    // Create ZIP (run from inside tempDir so paths are relative). Argument
+    // array, not shell interpolation: fixture paths are data, not commands.
     const cwd = process.cwd();
     process.chdir(tempDir);
     try {
-        execSync(`zip -qr "${zipPath}" "${packageName}"`, { encoding: 'utf-8' });
-    } catch (e) {
+        execFileSync('zip', ['-qr', zipPath, packageName], { encoding: 'utf-8' });
+    } finally {
         process.chdir(cwd);
-        throw e;
     }
-    process.chdir(cwd);
 
-    return { zipPath, manifest, entryContent, pkgDir };
+    return { zipPath, manifest, entryContent, pkgDir, requirementsBody };
 }
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 
 /** Create a fresh isolated import destination (never the real repo WebPayload). */
@@ -306,6 +420,25 @@ async function importZipExpectFailure(zipPath) {
         return error;
     }
     throw new Error('Expected importer to fail');
+}
+
+/**
+ * Stage a valid payload, attempt a failing import, and prove both that the
+ * import was rejected and that the previously staged payload is byte-for-byte
+ * unchanged. A non-zero exit code alone is not sufficient evidence.
+ */
+async function expectRejectedAndPreserved(buildBadZip, expectedError) {
+    const dest = await freshImportDest();
+    const goodDir = await makeTempDir();
+    const { zipPath: goodZip } = createTestZip(goodDir);
+    await importZip(goodZip, dest);
+    const before = await treeSha256(dest);
+
+    const badDir = await makeTempDir();
+    const { zipPath: badZip } = await buildBadZip(badDir);
+
+    await expect(importZip(badZip, dest)).rejects.toThrow(expectedError);
+    expect(await treeSha256(dest)).toBe(before);
 }
 
 describe('import-fortweb-runtime-package.mjs', () => {
@@ -354,6 +487,26 @@ describe('import-fortweb-runtime-package.mjs', () => {
         await expect(importZip(zipPath)).rejects.toThrow(/sha256 mismatch|size mismatch/);
     });
 
+    it('rejects tampered payload bytes against an authenticated manifest and preserves the previous payload', async () => {
+        // Chain of trust: checksums.sha256 authenticates manifest.json, and
+        // manifest.files[] authenticates the runtime payload bytes. Here the
+        // manifest and its checksum are untouched and valid, and only the
+        // payload bytes change.
+        //
+        // The tamper is byte-length preserving, so a size check cannot catch
+        // it: only the SHA-256 comparison can reject this package.
+        const original = '<!DOCTYPE html><html><head><title>Test</title></head><body>KERI</body></html>';
+        const tampered = '<!DOCTYPE html><html><head><title>Test</title></head><body>FAKE</body></html>';
+        expect(Buffer.byteLength(tampered)).toBe(Buffer.byteLength(original));
+
+        await expectRejectedAndPreserved(
+            async (dir) => createTestZip(dir, {
+                tamperFileAfterManifest: { path: 'app/index.html', content: tampered },
+            }),
+            /sha256 mismatch for "app\/index\.html"/,
+        );
+    });
+
     it('preserves manifest bytes exactly', async () => {
         const tempDir = await makeTempDir();
         const { zipPath, manifest } = createTestZip(tempDir);
@@ -369,6 +522,199 @@ describe('import-fortweb-runtime-package.mjs', () => {
         expect(importedManifest.files).toHaveLength(manifest.files.length);
     });
 
+    it('rejects an undeclared hidden directory file in the package', async () => {
+        const tempDir = await makeTempDir();
+        const { zipPath } = createTestZip(tempDir, {
+            hiddenFiles: [{ path: '.hidden/extra.js', content: 'console.log("undeclared");' }],
+        });
+
+        await expect(importZip(zipPath)).rejects.toThrow(/unexpected file not in manifest/);
+    });
+
+    it('rejects an undeclared root-level dotfile in the package', async () => {
+        const tempDir = await makeTempDir();
+        const { zipPath } = createTestZip(tempDir, {
+            hiddenFiles: [{ path: '.extra.js', content: 'console.log("undeclared");' }],
+        });
+
+        await expect(importZip(zipPath)).rejects.toThrow(/unexpected file not in manifest/);
+    });
+
+    it('imports a ZIP whose filename contains shell metacharacters', async () => {
+        const tempDir = await makeTempDir();
+        const { zipPath } = createTestZip(tempDir);
+
+        // Covers every metacharacter class the importer must treat as literal
+        // path data: spaces, single and double quotes, `$`, `;`, parentheses,
+        // command substitution, and backticks. A shell-interpolated unzip call
+        // would both mangle the path and execute the adjacent command.
+        const sentinel = 'fortios-ios1-injection-sentinel';
+        const adversarialName = `pkg "double" 'single' $dollar; touch ${sentinel}; (parens) $(sub) \`backtick\`.zip`;
+        const metacharZip = path.join(tempDir, adversarialName);
+
+        // Rename via fs (no shell) so the importer receives a path that would
+        // be mangled by shell interpolation but is a literal path on disk.
+        renameSync(zipPath, metacharZip);
+
+        const dest = await freshImportDest();
+        const { stdout } = await importZip(metacharZip, dest);
+        expect(stdout).toContain('Import complete');
+
+        // No adjacent command may have executed. Check both the import working
+        // directory and the archive directory.
+        expect(existsSync(path.join(repoRoot, sentinel))).toBe(false);
+        expect(existsSync(path.join(tempDir, sentinel))).toBe(false);
+    });
+
+    // --- IOS-2: required package metadata + transactional replacement ---
+
+    it('rejects a package missing checksums.sha256 and preserves the previous payload', async () => {
+        await expectRejectedAndPreserved(
+            async (dir) => createTestZip(dir, { omitChecksumFile: true }),
+            /required package metadata missing: checksums\.sha256/,
+        );
+    });
+
+    it('rejects a manifest checksum mismatch and preserves the previous payload', async () => {
+        await expectRejectedAndPreserved(
+            async (dir) => createTestZip(dir, { checksumText: `${'a'.repeat(64)}  manifest.json\n` }),
+            /checksums\.sha256 mismatch for "manifest\.json"/,
+        );
+    });
+
+    it('rejects a malformed checksum row and preserves the previous payload', async () => {
+        await expectRejectedAndPreserved(
+            async (dir) => createTestZip(dir, { checksumText: 'not-a-digest  manifest.json\n' }),
+            /checksums\.sha256 has a malformed row/,
+        );
+    });
+
+    it('rejects an empty checksum file and preserves the previous payload', async () => {
+        await expectRejectedAndPreserved(
+            async (dir) => createTestZip(dir, { checksumText: '\n' }),
+            /checksums\.sha256 is empty/,
+        );
+    });
+
+    it('rejects a checksum file that does not cover manifest.json and preserves the previous payload', async () => {
+        await expectRejectedAndPreserved(
+            async (dir) => createTestZip(dir, { checksumText: `${'b'.repeat(64)}  app/index.html\n` }),
+            /checksums\.sha256 does not cover manifest\.json/,
+        );
+    });
+
+    it('rejects a checksum file referencing an undeclared path and preserves the previous payload', async () => {
+        await expectRejectedAndPreserved(
+            async (dir) => createTestZip(dir, { checksumText: `${'c'.repeat(64)}  undeclared.js\n` }),
+            /checksums\.sha256 references an undeclared path/,
+        );
+    });
+
+    it('rejects a package missing manifest.json and preserves the previous payload', async () => {
+        const dest = await freshImportDest();
+        const goodDir = await makeTempDir();
+        const { zipPath: goodZip } = createTestZip(goodDir);
+        await importZip(goodZip, dest);
+        const before = await treeSha256(dest);
+
+        const badDir = await makeTempDir();
+        const pkgDir = path.join(badDir, 'fortweb-runtime');
+        mkdirSync(pkgDir, { recursive: true });
+        writeFileSync(path.join(pkgDir, 'checksums.sha256'), `${'d'.repeat(64)}  manifest.json\n`);
+        const badZip = path.join(badDir, 'no-manifest.zip');
+
+        const cwd = process.cwd();
+        process.chdir(badDir);
+        try {
+            execSync(`zip -qr "${badZip}" fortweb-runtime`, { encoding: 'utf-8' });
+        } finally {
+            process.chdir(cwd);
+        }
+
+        await expect(importZip(badZip, dest)).rejects.toThrow(/Cannot read manifest/);
+        expect(await treeSha256(dest)).toBe(before);
+    });
+
+    it('rejects a package missing the declared contracts descriptor and preserves the previous payload', async () => {
+        await expectRejectedAndPreserved(
+            async (dir) => createTestZip(dir, { omitContractsDescriptor: true }),
+            /runtime requirements descriptor missing: contracts\/runtime-requirements\.json/,
+        );
+    });
+
+    it('rejects a relocated contracts pointer and preserves the previous payload', async () => {
+        await expectRejectedAndPreserved(
+            async (dir) => createTestZip(dir, {
+                manifestOverrides: { contracts: { runtime_requirements: { path: 'other/requirements.json' } } },
+                omitContractsDescriptor: true,
+            }),
+            /unexpected manifest\.contracts\.runtime_requirements\.path/,
+        );
+    });
+
+    it('rejects a malformed contracts descriptor and preserves the previous payload', async () => {
+        await expectRejectedAndPreserved(
+            async (dir) => createTestZip(dir, { contractsText: '{"schema": "fort.runtime-requirements.v1",' }),
+            /invalid JSON/,
+        );
+    });
+
+    it('rejects a contracts descriptor that does not echo the manifest producer and preserves the previous payload', async () => {
+        await expectRejectedAndPreserved(
+            async (dir) => createTestZip(dir, { requirementsOverrides: { producer: 'someone-else' } }),
+            /producer mismatch/,
+        );
+    });
+
+    it('rejects an undeclared non-hidden file and preserves the previous payload', async () => {
+        await expectRejectedAndPreserved(
+            async (dir) => createTestZip(dir, { hiddenFiles: [{ path: 'extra.js', content: 'console.log(1);' }] }),
+            /unexpected file not in manifest/,
+        );
+    });
+
+    it('rejects a malformed manifest body and preserves the previous payload', async () => {
+        await expectRejectedAndPreserved(
+            async (dir) => createTestZip(dir, { manifestRawText: '{"schema_version": ' }),
+            /Cannot read manifest/,
+        );
+    });
+
+    it('rejects a package whose declared file is absent and preserves the previous payload', async () => {
+        await expectRejectedAndPreserved(
+            async (dir) => createTestZip(dir, {
+                manifestOverrides: {
+                    files: [
+                        { path: 'app/index.html', sha256: 'e'.repeat(64), bytes: 10 },
+                        { path: 'app/missing.js', sha256: 'f'.repeat(64), bytes: 5 },
+                    ],
+                },
+            }),
+            /manifest file missing: app\/missing\.js/,
+        );
+    });
+
+    it('imports a valid package, replaces the previous payload, and reports fortweb_commit_sha', async () => {
+        const dest = await freshImportDest();
+        const firstDir = await makeTempDir();
+        const { zipPath: firstZip } = createTestZip(firstDir);
+        await importZip(firstZip, dest);
+
+        // The second package adds a declared payload file. Replacement must be
+        // complete, not a merge over the previous payload.
+        const secondDir = await makeTempDir();
+        const { zipPath: secondZip } = createTestZip(secondDir, {
+            extraFiles: [{ path: 'app/extra.js', content: 'console.log("second");' }],
+        });
+        const { stdout } = await importZip(secondZip, dest);
+
+        expect(stdout).toContain('Import complete');
+        expect(stdout).toContain('commit:  0000000000000000000000000000000000000000');
+        expect(stdout).not.toContain('undefined');
+        expect(existsSync(path.join(dest, 'app', 'extra.js'))).toBe(true);
+        expect(existsSync(path.join(dest, 'app', 'index.html'))).toBe(true);
+    });
+
     it('rejects when entry document is missing from package', async () => {
         const tempDir = await makeTempDir();
         const pkgName = 'fortweb-runtime';
@@ -376,6 +722,11 @@ describe('import-fortweb-runtime-package.mjs', () => {
         const pkgDir = path.join(tempDir, pkgName);
 
         mkdirSync(pkgDir, { recursive: true });
+
+        // Canonical contracts descriptor, so this fixture reaches the
+        // manifest-declared-file check rather than the contracts gate.
+        const requirements = writeCanonicalRequirements(pkgDir);
+
         const manifest = {
             schema_version: '1.0.0',
             package_version: '0.0.0',
@@ -385,15 +736,26 @@ describe('import-fortweb-runtime-package.mjs', () => {
             fortweb_commit_sha: '0'.repeat(40),
             runtime_origin: 'https://appassets.androidplatform.net',
             entrypoint: 'app/index.html',
-            files: [{ path: 'app/index.html', sha256: '0'.repeat(64), bytes: 0 }],
+            contracts: { runtime_requirements: { path: requirements.relPath } },
+            files: [
+                { path: 'app/index.html', sha256: '0'.repeat(64), bytes: 0 },
+                {
+                    path: requirements.relPath,
+                    sha256: createHash('sha256').update(requirements.body).digest('hex'),
+                    bytes: Buffer.byteLength(requirements.body),
+                },
+            ],
         };
         writeFileSync(path.join(pkgDir, 'manifest.json'), JSON.stringify(manifest));
         // Don't create the entry document
 
         const cwd = process.cwd();
         process.chdir(tempDir);
-        execSync(`zip -qr "${zipPath}" "${pkgName}"`, { encoding: 'utf-8' });
-        process.chdir(cwd);
+        try {
+            execFileSync('zip', ['-qr', zipPath, pkgName], { encoding: 'utf-8' });
+        } finally {
+            process.chdir(cwd);
+        }
 
         await expect(importZip(zipPath)).rejects.toThrow(/Content validation|manifest file missing/);
     });
@@ -423,9 +785,8 @@ describe('import-fortweb-runtime-package.mjs', () => {
         const { zipPath: validZip } = createTestZip(tempDir1);
         await importZip(validZip, dest);
 
-        // Read the current state
-        const bp = path.join(dest, 'manifest.json');
-        const beforeManifest = await readFile(bp, 'utf-8');
+        // Snapshot the entire staged tree, not just the manifest
+        const beforeTree = await treeSha256(dest);
 
         // Try importing a bad package
         const tempDir2 = await makeTempDir();
@@ -433,15 +794,12 @@ describe('import-fortweb-runtime-package.mjs', () => {
             manifestOverrides: { package_name: 'wrong-name' },
         });
 
-        try {
-            await importZip(badZip, dest);
-        } catch {
-            // Expected
-        }
+        // The import must actually be rejected. A bare `catch {}` would let
+        // this test pass even if the import succeeded and replaced the payload.
+        await expect(importZip(badZip, dest)).rejects.toThrow(/unexpected package_name/);
 
         // Verify the isolated destination is unchanged
-        const afterManifest = await readFile(bp, 'utf-8');
-        expect(afterManifest).toBe(beforeManifest);
+        expect(await treeSha256(dest)).toBe(beforeTree);
     });
 });
 
@@ -511,6 +869,8 @@ describe('runtime package containment — adversarial', () => {
 
         const entryContent = '<html></html>';
         const entryHash = createHash('sha256').update(entryContent).digest('hex');
+        const requirements = writeCanonicalRequirements(pkgDir);
+
         const manifest = {
             schema_version: '1.0.0',
             package_version: '0.0.0',
@@ -520,7 +880,15 @@ describe('runtime package containment — adversarial', () => {
             fortweb_commit_sha: '0'.repeat(40),
             runtime_origin: 'https://appassets.androidplatform.net',
             entrypoint: 'app/index.html',
-            files: [{ path: 'app/index.html', sha256: entryHash, bytes: Buffer.byteLength(entryContent) }],
+            contracts: { runtime_requirements: { path: requirements.relPath } },
+            files: [
+                { path: 'app/index.html', sha256: entryHash, bytes: Buffer.byteLength(entryContent) },
+                {
+                    path: requirements.relPath,
+                    sha256: createHash('sha256').update(requirements.body).digest('hex'),
+                    bytes: Buffer.byteLength(requirements.body),
+                },
+            ],
         };
         writeFileSync(path.join(pkgDir, 'manifest.json'), JSON.stringify(manifest));
 
@@ -534,8 +902,11 @@ describe('runtime package containment — adversarial', () => {
 
         const cwd = process.cwd();
         process.chdir(tempDir);
-        execSync(`zip -qr "${zipPath}" "${pkgName}"`, { encoding: 'utf-8' });
-        process.chdir(cwd);
+        try {
+            execFileSync('zip', ['-qr', zipPath, pkgName], { encoding: 'utf-8' });
+        } finally {
+            process.chdir(cwd);
+        }
 
         await expect(importZip(zipPath)).rejects.toThrow(/unexpected file/);
     });
@@ -694,13 +1065,14 @@ describe('runtime package interop — real producer', () => {
         repoRoot, '..', 'fortweb', 'tools', 'package-runtime.mjs',
     );
 
-    it('imports a ZIP generated by the actual FortWeb packager', async () => {
-        // Skip if sibling checkout is unavailable (unit-test isolation)
+    it('imports a ZIP generated by the actual FortWeb packager', async (ctx) => {
+        // Skipping is reported as skipped, never as a silent pass: an absent
+        // sibling checkout must not look like passing producer interop.
         const fsPromises = await import('node:fs/promises');
         try {
             await fsPromises.stat(FORTWEB_PACKAGER);
         } catch {
-            return; // interop test requires sibling checkout
+            return ctx.skip('sibling FortWeb checkout with tools/package-runtime.mjs is unavailable');
         }
 
         const tempDir = await makeTempDir();
@@ -744,12 +1116,12 @@ describe('runtime package interop — real producer', () => {
             try { await fsPromises.rename(fortwebDistBak, fortwebDist); } catch { /* */ }
         }
 
-        if (!packagerOk) return;
+        if (!packagerOk) return ctx.skip('local FortWeb packager did not run in this environment');
 
         // Find the generated ZIP
         const zipEntries = await fsPromises.readdir(outDir);
         const zipName = zipEntries.find(e => e.endsWith('.zip'));
-        if (!zipName) return;
+        if (!zipName) return ctx.skip('local FortWeb packager produced no ZIP');
         const zipPath = path.join(outDir, zipName);
 
         // Import with Fort-ios importer into isolated destination
@@ -780,6 +1152,68 @@ describe('runtime package interop — real producer', () => {
         const redirect = await readFile(path.join(importDest, 'index.html'), 'utf-8');
         expect(redirect).toContain('./app/index.html');
     });
+});
+
+// --------------------------------------------------------------------------
+// Canonical published package — genuine #38 artifact import
+// --------------------------------------------------------------------------
+
+describe('runtime package interop — canonical published package', () => {
+    const canonicalPackage = process.env.FORTWEB_RUNTIME_PACKAGE_ZIP;
+
+    it.skipIf(!canonicalPackage)(
+        'imports a genuine canonical FortWeb package over an existing payload',
+        async () => {
+            const fsPromises = await import('node:fs/promises');
+            // A provided-but-missing artifact is a hard failure, not a skip.
+            await fsPromises.stat(canonicalPackage);
+
+            const dest = await freshImportDest();
+
+            // Stage a smaller package first so the real package exercises
+            // complete replacement rather than a first-time install.
+            const firstDir = await makeTempDir();
+            const { zipPath: firstZip } = createTestZip(firstDir);
+            await importZip(firstZip, dest);
+
+            const { stdout } = await importZip(canonicalPackage, dest);
+            expect(stdout).toContain('Import complete');
+            expect(stdout).not.toContain('undefined');
+
+            // Canonical provenance must be reported, not undefined.
+            const commitMatch = /commit:\s+([0-9a-f]{40})/.exec(stdout);
+            expect(commitMatch).not.toBeNull();
+
+            const manifest = JSON.parse(await readFile(path.join(dest, 'manifest.json'), 'utf-8'));
+            expect(manifest.producer).toBe('fortweb');
+            expect(manifest.payload_profile).toBe('offline-runtime');
+            expect(manifest.entrypoint).toBe('app/index.html');
+            expect(manifest.fortweb_commit_sha).toBe(commitMatch[1]);
+
+            // Exact inventory: declared files plus package metadata plus the
+            // wrapper-owned redirect written during activation.
+            const declared = new Set(manifest.files.map((f) => f.path));
+            declared.add('manifest.json');
+            declared.add('checksums.sha256');
+            declared.add('index.html');
+
+            const actual = [];
+            async function walk(current, prefix) {
+                for (const entry of await fsPromises.readdir(current, { withFileTypes: true })) {
+                    const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+                    if (entry.isDirectory()) {
+                        await walk(path.join(current, entry.name), rel);
+                    } else {
+                        actual.push(rel);
+                    }
+                }
+            }
+            await walk(dest, '');
+
+            expect(actual.filter((rel) => !declared.has(rel))).toEqual([]);
+            expect(actual.length).toBe(manifest.files.length + 3);
+        },
+    );
 });
 
 // --------------------------------------------------------------------------

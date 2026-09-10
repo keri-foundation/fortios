@@ -17,6 +17,8 @@
  *   - entrypoint:     app/index.html   (package-root-relative: fortweb-runtime/app/index.html)
  *   - manifest:       manifest.json
  *   - checksums:      checksums.sha256
+ *   - contracts:      contracts/runtime-requirements.json
+ *                     (manifest.contracts.runtime_requirements.path)
  *   - schema:         schema_version (string)
  *   - file size:      bytes
  *
@@ -28,8 +30,8 @@
  */
 
 import { createHash } from 'node:crypto';
-import { execSync } from 'node:child_process';
-import { mkdir, readFile, readdir, rm, stat, lstat, writeFile, symlink as fsSymlink } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, lstat, writeFile, symlink as fsSymlink } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { createReadStream } from 'node:fs';
 import path from 'node:path';
@@ -48,6 +50,8 @@ const EXPECTED_PROFILE = 'offline-runtime';
 const ENTRY_DOCUMENT = 'app/index.html';
 const MANIFEST_FILENAME = 'manifest.json';
 const CHECKSUM_FILENAME = 'checksums.sha256';
+// Canonical contracts descriptor location declared by manifest.contracts.
+const RUNTIME_REQUIREMENTS_PATH = 'contracts/runtime-requirements.json';
 
 // --- Helpers ---
 
@@ -109,7 +113,9 @@ async function isContained(rootDir, resolvedPath) {
 
 function listZipEntries(zipPath) {
   try {
-    const out = execSync(`unzip -l "${zipPath}"`, { encoding: 'utf-8', maxBuffer: 64 * 1024 * 1024 });
+    // Argument array, not shell interpolation: a ZIP path containing shell
+    // metacharacters must be treated as a literal filesystem path.
+    const out = execFileSync('unzip', ['-l', zipPath], { encoding: 'utf-8', maxBuffer: 64 * 1024 * 1024 });
     return parseUnzipList(out);
   } catch (e) {
     throw new Error(`Cannot list ZIP entries: ${e.message}`);
@@ -292,6 +298,18 @@ async function validateManifest(manifestPath, manifest) {
     }
   }
 
+  // The producer declares its contracts descriptor location. The importer
+  // requires that exact relative path: a package whose contracts pointer is
+  // missing, unsafe, or relocated is not a canonical runtime package.
+  const requirementsPath = manifest.contracts?.runtime_requirements?.path;
+  if (typeof requirementsPath !== 'string' || requirementsPath.length === 0) {
+    errors.push('manifest.contracts.runtime_requirements.path is missing');
+  } else if (!isSafeRelative(requirementsPath)) {
+    errors.push(`manifest.contracts.runtime_requirements.path is unsafe: ${requirementsPath}`);
+  } else if (requirementsPath !== RUNTIME_REQUIREMENTS_PATH) {
+    errors.push(`unexpected manifest.contracts.runtime_requirements.path: ${requirementsPath} (expected ${RUNTIME_REQUIREMENTS_PATH})`);
+  }
+
   return errors;
 }
 
@@ -365,7 +383,10 @@ async function walkDir(dir, prefix, manifestPaths, errors) {
     if (entry.isDirectory()) {
       await walkDir(fullPath, relPath, manifestPaths, errors);
     } else if (entry.isFile()) {
-      if (!manifestPaths.has(relPath) && !relPath.startsWith('.')) {
+      // Complete inventory check. The only tolerated extras are the reserved
+      // package metadata files added to manifestPaths above; there is no
+      // dot-prefix exemption, so an undeclared hidden file fails the import.
+      if (!manifestPaths.has(relPath)) {
         errors.push(`unexpected file not in manifest: ${relPath}`);
       }
     }
@@ -373,6 +394,177 @@ async function walkDir(dir, prefix, manifestPaths, errors) {
 }
 
 // --- Transactional replacement ---
+
+/**
+ * Verify the package checksum file against the extracted candidate bytes.
+ *
+ * Contract (from FortWeb `tools/package-runtime.mjs`):
+ *   - `checksums.sha256` lives at the package root and is REQUIRED.
+ *   - Rows are `<64-lowercase-hex>  <path>` (two spaces), sha256sum format.
+ *   - Rows cover reserved package metadata; payload files are covered by
+ *     `manifest.files` and verified separately.
+ *   - The file does not hash itself.
+ *
+ * All digests are recomputed from actual extracted bytes. The manifest, the
+ * ZIP metadata, and filenames are never trusted in place of byte hashing.
+ *
+ * @param {string} pkgRoot - extracted package root (`<extractDir>/<packageName>`)
+ * @param {object} manifest - parsed package manifest
+ * @param {Buffer} manifestRawBytes - raw bytes of manifest.json
+ * @returns {Promise<string[]>} human-readable violations (empty when valid)
+ */
+async function validateChecksums(pkgRoot, manifest, manifestRawBytes) {
+  const errors = [];
+  const checksumPath = path.join(pkgRoot, CHECKSUM_FILENAME);
+
+  let text;
+  try {
+    text = await readFile(checksumPath, 'utf8');
+  } catch (e) {
+    if (e.code === 'ENOENT') {
+      return [`required package metadata missing: ${CHECKSUM_FILENAME}`];
+    }
+    return [`cannot read ${CHECKSUM_FILENAME}: ${e.message}`];
+  }
+
+  const lines = text.split('\n').map((line) => line.trimEnd()).filter((line) => line.length > 0);
+  if (lines.length === 0) {
+    return [`${CHECKSUM_FILENAME} is empty`];
+  }
+
+  const declared = new Set(manifest.files.map((f) => f.path));
+  const reserved = new Set([MANIFEST_FILENAME, CHECKSUM_FILENAME]);
+  const seen = new Set();
+  const rows = [];
+
+  for (const line of lines) {
+    const match = /^([0-9a-f]{64}) {2}(.+)$/.exec(line);
+    if (!match) {
+      errors.push(`${CHECKSUM_FILENAME} has a malformed row: ${JSON.stringify(line)}`);
+      continue;
+    }
+    const [, digest, relPath] = match;
+    if (!isSafeRelative(relPath)) {
+      errors.push(`${CHECKSUM_FILENAME} has an unsafe path: ${relPath}`);
+      continue;
+    }
+    if (seen.has(relPath)) {
+      errors.push(`${CHECKSUM_FILENAME} has a duplicate path: ${relPath}`);
+      continue;
+    }
+    seen.add(relPath);
+    // A row may reference reserved package metadata or a manifest-declared
+    // payload file. Nothing else is permitted.
+    if (!reserved.has(relPath) && !declared.has(relPath)) {
+      errors.push(`${CHECKSUM_FILENAME} references an undeclared path: ${relPath}`);
+      continue;
+    }
+    rows.push({ digest, relPath });
+  }
+  if (errors.length > 0) {
+    return errors;
+  }
+
+  const manifestRow = rows.find((row) => row.relPath === MANIFEST_FILENAME);
+  if (!manifestRow) {
+    errors.push(`${CHECKSUM_FILENAME} does not cover ${MANIFEST_FILENAME}`);
+  } else {
+    const actual = await sha256Buffer(manifestRawBytes);
+    if (actual !== manifestRow.digest) {
+      errors.push(`${CHECKSUM_FILENAME} mismatch for "${MANIFEST_FILENAME}": expected ${manifestRow.digest}, got ${actual}`);
+    }
+  }
+
+  for (const row of rows) {
+    if (row.relPath === MANIFEST_FILENAME) {
+      continue;
+    }
+    const target = path.join(pkgRoot, row.relPath);
+    try {
+      const targetStat = await stat(target);
+      if (!targetStat.isFile()) {
+        errors.push(`${CHECKSUM_FILENAME} entry is not a regular file: ${row.relPath}`);
+        continue;
+      }
+      const actual = await sha256File(target);
+      if (actual !== row.digest) {
+        errors.push(`${CHECKSUM_FILENAME} mismatch for "${row.relPath}": expected ${row.digest}, got ${actual}`);
+      }
+    } catch (e) {
+      if (e.code === 'ENOENT') {
+        errors.push(`${CHECKSUM_FILENAME} references a missing file: ${row.relPath}`);
+      } else {
+        errors.push(`cannot verify "${row.relPath}": ${e.message}`);
+      }
+    }
+  }
+
+  return errors;
+}
+
+/**
+ * Verify the package contracts descriptor referenced by the manifest.
+ *
+ * Contract (from FortWeb `tools/package-runtime.mjs` #38):
+ *   - `manifest.contracts.runtime_requirements.path` points at a declared
+ *     payload file that carries the runtime requirements the host must honour.
+ *   - That file is strict UTF-8 JSON whose `producer` and `payload_profile`
+ *     echo the manifest, so a host can never pair a payload with a foreign
+ *     requirements descriptor.
+ *
+ * Only fields that exist in the canonical producer output are required.
+ *
+ * @param {string} pkgRoot - extracted package root
+ * @param {object} manifest - parsed package manifest
+ * @returns {Promise<string[]>} human-readable violations (empty when valid)
+ */
+async function validateRuntimeRequirements(pkgRoot, manifest) {
+  const errors = [];
+  const requirementsPath = manifest.contracts?.runtime_requirements?.path;
+  if (typeof requirementsPath !== 'string' || requirementsPath.length === 0) {
+    return ['manifest.contracts.runtime_requirements.path is missing'];
+  }
+
+  const descriptorPath = path.join(pkgRoot, requirementsPath);
+  let raw;
+  try {
+    // fatal decoding rejects invalid UTF-8 rather than silently replacing bytes.
+    raw = new TextDecoder('utf-8', { fatal: true }).decode(await readFile(descriptorPath));
+  } catch (e) {
+    if (e.code === 'ENOENT') {
+      return [`runtime requirements descriptor missing: ${requirementsPath}`];
+    }
+    return [`cannot read runtime requirements descriptor: ${e.message}`];
+  }
+
+  if (raw.includes('\uFFFD')) {
+    errors.push(`${requirementsPath}: contains U+FFFD replacement characters`);
+  }
+
+  let descriptor;
+  try {
+    descriptor = JSON.parse(raw);
+  } catch (e) {
+    errors.push(`${requirementsPath}: invalid JSON: ${e.message}`);
+    return errors;
+  }
+
+  if (!descriptor || typeof descriptor !== 'object' || Array.isArray(descriptor)) {
+    errors.push(`${requirementsPath}: must be a JSON object`);
+    return errors;
+  }
+  if (typeof descriptor.schema !== 'string' || descriptor.schema.trim().length === 0) {
+    errors.push(`${requirementsPath}: missing or invalid schema`);
+  }
+  if (descriptor.producer !== manifest.producer) {
+    errors.push(`${requirementsPath}: producer mismatch (expected "${manifest.producer}", got "${descriptor.producer ?? '(missing)'}")`);
+  }
+  if (descriptor.payload_profile !== manifest.payload_profile) {
+    errors.push(`${requirementsPath}: payload_profile mismatch (expected "${manifest.payload_profile}", got "${descriptor.payload_profile ?? '(missing)'}")`);
+  }
+
+  return errors;
+}
 
 async function copyTree(src, dest) {
   const entries = await readdir(src, { withFileTypes: true });
@@ -495,7 +687,9 @@ async function atomicReplace(srcDir, destDir, packageName, options = {}) {
 
 async function importPackage(zipPath) {
   const packageName = EXPECTED_PACKAGE_NAME;
-  const extractDir = path.join(tmpdir(), `fortweb-import-${Date.now()}`);
+  // Unpredictable, exclusively-created candidate directory. All validation
+  // happens against this candidate, never against the live payload.
+  const extractDir = await mkdtemp(path.join(tmpdir(), 'fortweb-import-'));
 
   console.log(`Importing: ${zipPath}`);
 
@@ -521,7 +715,8 @@ async function importPackage(zipPath) {
   await mkdir(extractDir, { recursive: true });
 
   try {
-    execSync(`unzip -qo "${zipPath}" -d "${extractDir}"`, {
+    // Argument array, not shell interpolation (see listZipEntries).
+    execFileSync('unzip', ['-qo', zipPath, '-d', extractDir], {
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
     });
@@ -549,9 +744,12 @@ async function importPackage(zipPath) {
   console.log('Validating manifest...');
   const manifestPath = path.join(pkgRoot, MANIFEST_FILENAME);
   let manifest;
+  let manifestRawBytes;
   try {
-    const manifestBytes = await readFile(manifestPath, 'utf-8');
-    manifest = JSON.parse(manifestBytes);
+    // Retain the raw bytes: the package checksum file covers manifest.json, so
+    // its digest must be computed over exactly these bytes.
+    manifestRawBytes = await readFile(manifestPath);
+    manifest = JSON.parse(manifestRawBytes.toString('utf8'));
   } catch (e) {
     await rm(extractDir, { recursive: true, force: true });
     throw new Error(`Cannot read manifest: ${e.message}`);
@@ -571,17 +769,36 @@ async function importPackage(zipPath) {
     throw new Error(`Content validation failed:\n  ${contentErrors.join('\n  ')}`);
   }
 
-  // 7. Replace destination atomically
+  // 7. Verify the required package checksum file against extracted bytes.
+  // This runs before any replacement: a checksum failure must leave the
+  // previously staged payload byte-for-byte unchanged.
+  console.log('Verifying package checksums...');
+  const checksumErrors = await validateChecksums(pkgRoot, manifest, manifestRawBytes);
+  if (checksumErrors.length > 0) {
+    await rm(extractDir, { recursive: true, force: true });
+    throw new Error(`Checksum validation failed:\n  ${checksumErrors.join('\n  ')}`);
+  }
+
+  // 8. Verify the declared runtime/package contracts descriptor.
+  console.log('Verifying runtime requirements...');
+  const requirementsErrors = await validateRuntimeRequirements(pkgRoot, manifest);
+  if (requirementsErrors.length > 0) {
+    await rm(extractDir, { recursive: true, force: true });
+    throw new Error(`Runtime requirements validation failed:\n  ${requirementsErrors.join('\n  ')}`);
+  }
+
+  // 9. Replace destination atomically. This is the first and only point at
+  // which the live payload is touched.
   console.log(`Staging to ${PAYLOAD_DEST}...`);
   const dryRun = process.env.FORTWEB_IMPORT_DRY_RUN === '1';
   await atomicReplace(extractDir, PAYLOAD_DEST, packageName, { dryRun });
 
-  // 8. Clean up
+  // 10. Clean up
   await rm(extractDir, { recursive: true, force: true });
 
   console.log(`Import complete: ${manifest.files.length} files staged`);
   console.log(`  package: ${manifest.package_name}`);
-  console.log(`  sha:     ${manifest.git_sha}`);
+  console.log(`  commit:  ${manifest.fortweb_commit_sha}`);
   console.log(`  profile: ${manifest.payload_profile}`);
 }
 
