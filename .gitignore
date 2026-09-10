@@ -5,6 +5,11 @@
 DerivedData/
 build/
 
+# Local/generated App Store export options (environment-specific release
+# configuration that may contain signing/provisioning mappings). The
+# committed template is ExportOptions.plist.example.
+ExportOptions.plist
+
 # Xcode per-user state inside nested projects
 xcodeproj/**/xcuserdata/
 
@@ -17,12 +22,8 @@ WebPayload/*
 WebPayloadOverride/*
 !WebPayloadOverride/.gitkeep
 
-# Web payload build outputs (never commit)
-dist/
+# Node tooling (never commit)
 node_modules/
-
-# Pyodide runtime (downloaded at build time via make pyodide)
-public/pyodide/
 
 # Python / misc
 __pycache__/
@@ -33,3 +34,32 @@ __pycache__/
 # IDE
 .sourcekit-lsp/
 *.swp
+
+# Test output
+test-results/
+.pytest_cache/
+
+# Release candidates and distribution artifacts (generated, environment-specific)
+*.xcarchive
+*.ipa
+*.dSYM
+
+# Runtime producer checkout (populated by CI and local packaging runs)
+.deps/
+
+# Secret-sensitive material. Templates carry no values and stay committable.
+.env
+.env.*
+!.env.example
+*.p12
+*.pfx
+
+# Build logs and scratch output
+*.log
+*.tmp
+*.bak
+*.orig
+
+# Xcode per-user state (directory form used inside .xcodeproj) and SwiftPM cache
+xcuserdata/
+.swiftpm/

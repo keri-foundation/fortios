@@ -14,12 +14,12 @@ private func writeFile(_ url: URL, content: String) throws -> URL {
 private func writeValidPayloadManifest(_ dir: URL) throws {
     let manifest = """
     {
-      "producer": "fortweb-shared",
-      "payload_profile": "product-shell",
-      "entry_document": "fortweb/app/index.html"
+      "producer": "fortweb",
+      "payload_profile": "offline-runtime",
+      "entrypoint": "app/index.html"
     }
     """
-    _ = try writeFile(dir.appendingPathComponent("build-manifest.json"), content: manifest)
+    _ = try writeFile(dir.appendingPathComponent("manifest.json"), content: manifest)
 }
 
 // MARK: - MIME Tests
@@ -273,15 +273,146 @@ struct PathNormalisationTests {
         {
           "producer": "fort-ios-local",
           "payload_profile": "proof-shell",
-          "entry_document": "index.html"
+          "entrypoint": "index.html"
         }
         """
-        _ = try writeFile(tmp.appendingPathComponent("build-manifest.json"), content: manifest)
+        _ = try writeFile(tmp.appendingPathComponent("manifest.json"), content: manifest)
         _ = try writeFile(tmp.appendingPathComponent("index.html"), content: "<html></html>")
 
         let handler = makeHandler(dir: tmp)
         let url = URL(string: "\(AppConfig.Scheme.name)://local/index.html")!
         #expect(throws: PayloadSchemeError.invalidPayloadManifest) {
+            _ = try handler.loadResource(for: url)
+        }
+    }
+}
+
+// MARK: - /fortweb/ Virtual Mount Tests
+
+@Suite("PayloadSchemeHandler /fortweb/ virtual mount")
+struct FortWebMountTests {
+
+    private func makeHandler(dir: URL) -> PayloadSchemeHandler {
+        PayloadSchemeHandler(payloadDirectory: dir)
+    }
+
+    /// Writes a file at `dir/<relPath>`, creating any intermediate directories.
+    private func writeNested(_ dir: URL, _ relPath: String, content: String = "x") throws {
+        let fileURL = dir.appendingPathComponent(relPath)
+        try FileManager.default.createDirectory(
+            at: fileURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        _ = try writeFile(fileURL, content: content)
+    }
+
+    @Test("/fortweb/wheels/x.whl maps onto flat wheels/x.whl")
+    func fortwebWheelMapsToFlatWheel() throws {
+        let tmp: URL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        try writeValidPayloadManifest(tmp)
+        try writeNested(tmp, "wheels/a.whl")
+
+        let handler = makeHandler(dir: tmp)
+        let url = URL(string: "\(AppConfig.Scheme.name)://local/fortweb/wheels/a.whl")!
+        let (data, mime, _) = try handler.loadResource(for: url)
+        #expect(!data.isEmpty)
+        #expect(mime == "application/zip")
+    }
+
+    @Test("/fortweb/vendor/pyodide/x.whl maps onto flat vendor/pyodide/x.whl")
+    func fortwebVendorMapsToFlatVendor() throws {
+        let tmp: URL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        try writeValidPayloadManifest(tmp)
+        try writeNested(tmp, "vendor/pyodide/a.whl")
+
+        let handler = makeHandler(dir: tmp)
+        let url = URL(string: "\(AppConfig.Scheme.name)://local/fortweb/vendor/pyodide/a.whl")!
+        let (data, mime, _) = try handler.loadResource(for: url)
+        #expect(!data.isEmpty)
+        #expect(mime == "application/zip")
+    }
+
+    @Test("/fortweb/app/index.html maps onto flat app/index.html")
+    func fortwebAppIndexMapsToFlat() throws {
+        let tmp: URL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        try writeValidPayloadManifest(tmp)
+        try writeNested(tmp, "app/index.html", content: "<html></html>")
+
+        let handler = makeHandler(dir: tmp)
+        let url = URL(string: "\(AppConfig.Scheme.name)://local/fortweb/app/index.html")!
+        let (data, mime, _) = try handler.loadResource(for: url)
+        #expect(!data.isEmpty)
+        #expect(mime.hasPrefix("text/html"))
+    }
+
+    @Test("unprefixed payload URLs keep existing behaviour")
+    func unprefixedStillWorks() throws {
+        let tmp: URL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        try writeValidPayloadManifest(tmp)
+        try writeNested(tmp, "wheels/a.whl")
+
+        let handler = makeHandler(dir: tmp)
+        let url = URL(string: "\(AppConfig.Scheme.name)://local/wheels/a.whl")!
+        let (data, _, _) = try handler.loadResource(for: url)
+        #expect(!data.isEmpty)
+    }
+
+    @Test("non-leading fortweb segment is not treated as a mount")
+    func nonLeadingFortwebNotMounted() throws {
+        let tmp: URL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        try writeValidPayloadManifest(tmp)
+        // The real resource lives at something/wheels/a.whl; a path with a
+        // mid-path `fortweb` segment must NOT be remapped onto it.
+        try writeNested(tmp, "something/wheels/a.whl")
+
+        let handler = makeHandler(dir: tmp)
+        let url = URL(string: "\(AppConfig.Scheme.name)://local/something/fortweb/wheels/a.whl")!
+        #expect(throws: PayloadSchemeError.missingResource) {
+            _ = try handler.loadResource(for: url)
+        }
+    }
+
+    @Test("/fortweb/../outside is still blocked (traversal)")
+    func fortwebTraversalBlocked() throws {
+        let tmp: URL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        try writeValidPayloadManifest(tmp)
+
+        let handler = makeHandler(dir: tmp)
+        let url = URL(string: "\(AppConfig.Scheme.name)://local/fortweb/../outside")!
+        #expect(throws: PayloadSchemeError.disallowedPath) {
+            _ = try handler.loadResource(for: url)
+        }
+    }
+
+    @Test("encoded traversal under /fortweb/ is still blocked")
+    func fortwebEncodedTraversalBlocked() throws {
+        let tmp: URL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        try writeValidPayloadManifest(tmp)
+
+        let handler = makeHandler(dir: tmp)
+        let url = URL(string: "\(AppConfig.Scheme.name)://local/fortweb/%2e%2e/outside")!
+        #expect(throws: PayloadSchemeError.disallowedPath) {
             _ = try handler.loadResource(for: url)
         }
     }

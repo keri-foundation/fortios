@@ -1,27 +1,31 @@
 {
-  "name": "fort-ios-browser-validation",
+  "name": "fort-ios-tooling",
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "prebuild": "node tools/gen-bridge-contract.mjs",
-    "build": "vite build",
-    "build:ci": "node tools/gen-bridge-contract.mjs && vite build && node tools/gen-build-manifest.mjs",
     "bridge:check": "node tools/gen-bridge-contract.mjs --check",
-    "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest",
-    "test:e2e": "playwright test"
+    "runtime:import": "node tools/import-fortweb-runtime-package.mjs",
+    "test:runtime-package-interop": "node tools/runtime-package-interop.mjs",
+    "check:containment": "node tools/assert-payload-containment.mjs",
+    "check:integrity": "node tools/assert-payload-integrity.mjs",
+    "check:pyodide": "node tools/assert-pyodide-runtime.mjs",
+    "check:payload": "npm run check:containment && npm run check:integrity && npm run check:pyodide",
+    "validate:runtime-platform-config": "node tools/validate-runtime-platform-config.mjs",
+    "test:runtime-platform-config": "node --test tools/validate-runtime-platform-config.test.mjs",
+    "validate:runtime-requirements-compatibility": "node tools/validate-runtime-requirements-compatibility.mjs",
+    "test:runtime-requirements-compatibility": "node --test tools/validate-runtime-requirements-compatibility.test.mjs",
+    "verify:release-archive": "node tools/assert-release-archive.mjs",
+    "certify:release-archive": "node tools/assert-release-archive.mjs --release-certification",
+    "repo-hygiene": "node tools/assert-repo-hygiene.mjs",
+    "check:release-sanitization": "node tools/scan-release-content.mjs --dir WebPayload",
+    "knip": "knip"
   },
   "engines": {
     "node": "22.12.0"
   },
   "devDependencies": {
-    "@playwright/test": "^1.58.2",
-    "@types/node": "^25.3.0",
-    "jsdom": "^28.1.0",
-    "typescript": "5.7.3",
-    "vite": "6.1.0",
+    "knip": "^6.27.0",
     "vitest": "^4.0.18"
   }
 }

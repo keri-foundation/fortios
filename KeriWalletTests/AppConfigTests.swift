@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 
 @testable import KeriWallet
@@ -16,6 +17,14 @@ struct AppConfigTests {
     @Test("entry URL uses the registered scheme name")
     func entryURLUsesScheme() {
         #expect(AppConfig.Scheme.entryURL.hasPrefix(AppConfig.Scheme.name + "://"))
+    }
+
+    @Test("entry URL path points at the declared producer entry document")
+    func entryURLMatchesRequiredEntryDocument() throws {
+        let url = try #require(URL(string: AppConfig.Scheme.entryURL))
+        #expect(url.scheme == AppConfig.Scheme.name)
+        #expect(url.host == AppConfig.Bridge.TrustedOrigin.host)
+        #expect(url.path == "/" + AppConfig.Payload.requiredEntryDocument)
     }
 
     @Test("defaultIndexPath is index.html")

@@ -1,77 +1,98 @@
 name: iOS Security Checks
 
+# GitHub Actions hardening notes:
+#   - Every action is pinned to a full commit SHA. The `v5` tag of
+#     actions/setup-python is a lightweight tag on commit a26af69b, so the pin
+#     records that commit rather than a moving major-version tag.
+#   - This workflow declares read-only token permissions. Repository defaults
+#     are irrelevant here because an explicit block makes every unlisted scope
+#     none.
+#   - Validation jobs must not persist checkout credentials: no step pushes.
+#   - This is the PR lane. It does not certify a release candidate; producer
+#     owned payload defects are reported here and enforced by
+#     release-certification.yml.
+
 permissions:
   contents: read
 
 on:
   pull_request:
     paths:
-      - '.github/workflows/ios-security.yml'
-      - '.github/workflows/ios-pyodide-slow.yml'
+      - '.github/workflows/**'
       - '.tool-versions'
+      - '.swiftlint.yml'
+      - '.swiftlint-baseline.json'
+      - '.gitignore'
       - 'Makefile'
       - 'README.md'
       - 'bridge-contract.json'
-      - 'build-payload.sh'
-      - 'sync-payload.sh'
+      - 'knip.jsonc'
       - 'package.json'
       - 'package-lock.json'
-      - 'tsconfig.json'
-      - 'playwright.config.ts'
-      - 'vite.config.ts'
       - 'vitest.config.ts'
-      - 'src/**'
-      - 'playwright/**'
+      - 'runtime-platform-config.json'
+      - 'scripts/**'
       - 'tools/**'
       - 'KeriWallet/**'
       - 'KeriWalletTests/**'
       - 'KeriWalletUITests/**'
+      - 'KeriWallet.xcodeproj/**'
+      - 'generated/**'
       - 'Config/**'
-      - 'xcodeproj/**'
+      - 'ExportOptions.plist.example'
   push:
     branches:
       - main
     paths:
-      - '.github/workflows/ios-security.yml'
-      - '.github/workflows/ios-pyodide-slow.yml'
+      - '.github/workflows/**'
       - '.tool-versions'
+      - '.swiftlint.yml'
+      - '.swiftlint-baseline.json'
+      - '.gitignore'
       - 'Makefile'
       - 'README.md'
       - 'bridge-contract.json'
-      - 'build-payload.sh'
-      - 'sync-payload.sh'
+      - 'knip.jsonc'
       - 'package.json'
       - 'package-lock.json'
-      - 'tsconfig.json'
-      - 'playwright.config.ts'
-      - 'vite.config.ts'
       - 'vitest.config.ts'
-      - 'src/**'
-      - 'playwright/**'
+      - 'runtime-platform-config.json'
+      - 'scripts/**'
       - 'tools/**'
       - 'KeriWallet/**'
       - 'KeriWalletTests/**'
       - 'KeriWalletUITests/**'
+      - 'KeriWallet.xcodeproj/**'
+      - 'generated/**'
       - 'Config/**'
-      - 'xcodeproj/**'
+      - 'ExportOptions.plist.example'
   workflow_dispatch:
 
 jobs:
   payload-checks:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
       FORTWEB_DIR: ${{ github.workspace }}/.deps/fortweb
+      FORTWEB_RUNTIME_SOURCE_URL: https://github.com/keri-foundation/fortweb/releases/download/runtime-source-pyodide-314-20260909/runtime-source.tar.gz
+      FORTWEB_RUNTIME_SOURCE_ARCHIVE_SHA256: e04833249eec88596e0f2f88d32baa6d5fae6b2e964996587061ddac4bd78c72
+      FORTWEB_RUNTIME_SOURCE_MANIFEST: build/runtime-source/manifest.json
+      FORTWEB_RUNTIME_SOURCE_MANIFEST_SHA256: 87bcc689d7778840a76284471ff599cef21be41df2b429724f7f4fdc5f022135
+      FORTWEB_PACKAGE_REF: refs/heads/pyodide-314-runtime
 
     steps:
       - name: Check out repository
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
         with:
+          persist-credentials: false
           fetch-depth: 0
 
       - name: Check out FortWeb dependency
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
         with:
+          persist-credentials: false
           repository: keri-foundation/fortweb
+          ref: bdb81afa7593603141e8db306f0636a583d2db02
           path: .deps/fortweb
 
       - name: Set up Node
@@ -82,38 +103,121 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+
+      - name: Build canonical FortWeb runtime
+        run: |
+          npm ci --prefix "$FORTWEB_DIR"
+          (cd "$FORTWEB_DIR" && python3 scripts/acquire_runtime_source.py \
+            --url "$FORTWEB_RUNTIME_SOURCE_URL" \
+            --sha256 "$FORTWEB_RUNTIME_SOURCE_ARCHIVE_SHA256" \
+            --manifest-sha256 "$FORTWEB_RUNTIME_SOURCE_MANIFEST_SHA256" \
+            --output build/runtime-source)
+          python3 -m pip install --disable-pip-version-check --no-index --no-deps \
+            "$FORTWEB_DIR/build/runtime-source/wheelhouse/packaging-26.1-py3-none-any.whl" \
+            "$FORTWEB_DIR/build/runtime-source/wheelhouse/setuptools-83.0.0-py3-none-any.whl" \
+            "$FORTWEB_DIR/build/runtime-source/wheelhouse/wheel-0.47.0-py3-none-any.whl"
+          (cd "$FORTWEB_DIR" && npm run build:runtime && \
+            FORTWEB_RUNTIME_SOURCE_MANIFEST="$FORTWEB_RUNTIME_SOURCE_MANIFEST" \
+            FORTWEB_RUNTIME_SOURCE_MANIFEST_SHA256="$FORTWEB_RUNTIME_SOURCE_MANIFEST_SHA256" \
+            npm run package:runtime -- --runtime-dir dist/runtime --python python3 --output-dir dist/package --ref "$FORTWEB_PACKAGE_REF")
+          test -f "$FORTWEB_DIR/dist/package/fortweb-runtime-0.0.0.zip"
 
       - name: Verify bridge contract output
         run: make bridge-check
 
-      - name: Run TypeScript checks
-        run: npm run typecheck
-
       - name: Enforce wrapper payload contract
         run: make payload-contract
 
-      - name: Run TypeScript unit tests
-        run: make test-ts
+      - name: Validate runtime platform configuration
+        run: npm run validate:runtime-platform-config
 
-      - name: Install Playwright browser
-        run: npx playwright install --with-deps chromium
+      - name: Test runtime platform configuration
+        run: npm run test:runtime-platform-config
 
-      - name: Run fast Playwright smoke tests
-        run: make test-e2e
+      - name: Validate runtime requirements compatibility
+        run: npm run validate:runtime-requirements-compatibility
+
+      - name: Test runtime requirements compatibility
+        run: npm run test:runtime-requirements-compatibility
+
+      - name: Run Node tool tests (Vitest)
+        run: make test-tools
+
+      - name: Report unused code and dependencies (Knip)
+        run: make knip
+
+      - name: Verify tracked-tree hygiene
+        run: make repo-hygiene
 
   swift-tests:
-    runs-on: macos-15
+    runs-on: macos-26
+    timeout-minutes: 45
     env:
+      DEVELOPER_DIR: /Applications/Xcode_26.5.app/Contents/Developer
       FORTWEB_DIR: ${{ github.workspace }}/.deps/fortweb
+      FORTWEB_RUNTIME_SOURCE_URL: https://github.com/keri-foundation/fortweb/releases/download/runtime-source-pyodide-314-20260909/runtime-source.tar.gz
+      FORTWEB_RUNTIME_SOURCE_ARCHIVE_SHA256: e04833249eec88596e0f2f88d32baa6d5fae6b2e964996587061ddac4bd78c72
+      FORTWEB_RUNTIME_SOURCE_MANIFEST: build/runtime-source/manifest.json
+      FORTWEB_RUNTIME_SOURCE_MANIFEST_SHA256: 87bcc689d7778840a76284471ff599cef21be41df2b429724f7f4fdc5f022135
+      FORTWEB_PACKAGE_REF: refs/heads/pyodide-314-runtime
+      SIMULATOR_NAME: 'iPhone 17 Pro'
+      SIMULATOR_OS: '26.5'
+      RESULT_BUNDLE_PATH: build/TestResults.xcresult
 
     steps:
       - name: Check out repository
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
+        with:
+          persist-credentials: false
+
+      # Lint asks "did THIS pull request add lint debt beyond its reviewed
+      # baseline?", so it reads the pull-request head. Every step from the
+      # FortWeb checkout down asks "does this pull request still work when merged
+      # into main?", so it keeps the merge-result checkout that GitHub creates.
+      # Those are different questions that need different trees: a frozen
+      # baseline belongs to the pull-request source, and a moving main must not
+      # be able to invalidate it. Do not collapse the two back into one checkout.
+      - name: Check out pull-request head for linting
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: .pr-head-lint
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Install SwiftLint
+        run: brew install swiftlint
+
+      - name: Lint pull-request sources
+        if: github.event_name == 'pull_request'
+        # Same entrypoint as local validation: SwiftLint over the pull-request
+        # head with the frozen backlog baseline, failing only on new violations.
+        # The lint tree is removed afterwards so a nested checkout cannot affect
+        # repository scanning or Xcode build discovery in the steps below.
+        run: |
+          set -euxo pipefail
+          trap 'rm -rf .pr-head-lint' EXIT
+          make -C .pr-head-lint lint
+
+      - name: Lint checked-out sources
+        if: github.event_name != 'pull_request'
+        # Push and manual dispatch have no pull-request head, so lint measures
+        # the checked-out commit. Baselines are reviewed inputs: CI consumes
+        # them and never regenerates them.
+        run: make lint
 
       - name: Check out FortWeb dependency
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
         with:
+          persist-credentials: false
           repository: keri-foundation/fortweb
+          ref: bdb81afa7593603141e8db306f0636a583d2db02
           path: .deps/fortweb
 
       - name: Set up Node
@@ -125,8 +229,181 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+
+      - name: Build canonical FortWeb runtime
+        run: |
+          npm ci --prefix "$FORTWEB_DIR"
+          (cd "$FORTWEB_DIR" && python3 scripts/acquire_runtime_source.py \
+            --url "$FORTWEB_RUNTIME_SOURCE_URL" \
+            --sha256 "$FORTWEB_RUNTIME_SOURCE_ARCHIVE_SHA256" \
+            --manifest-sha256 "$FORTWEB_RUNTIME_SOURCE_MANIFEST_SHA256" \
+            --output build/runtime-source)
+          python3 -m pip install --disable-pip-version-check --no-index --no-deps \
+            "$FORTWEB_DIR/build/runtime-source/wheelhouse/packaging-26.1-py3-none-any.whl" \
+            "$FORTWEB_DIR/build/runtime-source/wheelhouse/setuptools-83.0.0-py3-none-any.whl" \
+            "$FORTWEB_DIR/build/runtime-source/wheelhouse/wheel-0.47.0-py3-none-any.whl"
+          (cd "$FORTWEB_DIR" && npm run build:runtime && \
+            FORTWEB_RUNTIME_SOURCE_MANIFEST="$FORTWEB_RUNTIME_SOURCE_MANIFEST" \
+            FORTWEB_RUNTIME_SOURCE_MANIFEST_SHA256="$FORTWEB_RUNTIME_SOURCE_MANIFEST_SHA256" \
+            npm run package:runtime -- --runtime-dir dist/runtime --python python3 --output-dir dist/package --ref "$FORTWEB_PACKAGE_REF")
+          test -f "$FORTWEB_DIR/dist/package/fortweb-runtime-0.0.0.zip"
+
       - name: Enforce wrapper payload contract
         run: make payload-contract
 
-      - name: Run Swift unit and UI tests
-        run: make test-swift
+      - name: Validate runtime requirements compatibility
+        run: npm run validate:runtime-requirements-compatibility
+
+      - name: Resolve simulator destination
+        id: resolve-sim
+        run: |
+          SIM_UDID="$(python3 ./scripts/resolve-ios-simulator.py --udid)"
+          echo "sim_udid=$SIM_UDID" >> "$GITHUB_OUTPUT"
+          echo "Resolved: $SIM_UDID"
+
+      - name: Build and test Swift (native unit + UI)
+        timeout-minutes: 40
+        run: |
+          set -euxo pipefail
+          FORTWEB_DIR="$FORTWEB_DIR" xcodebuild test \
+            -project KeriWallet.xcodeproj \
+            -scheme KeriWallet \
+            -configuration Debug \
+            -destination "platform=iOS Simulator,id=${{ steps.resolve-sim.outputs.sim_udid }}" \
+            -resultBundlePath "$RESULT_BUNDLE_PATH" \
+            -derivedDataPath build/DerivedData-sim
+
+      - name: Collect native bundle failure diagnostics
+        if: failure()
+        # Best effort only. The primary failure may have happened before a
+        # simulator existed (a lint failure, for example), so simulator logs are
+        # collected only when the destination was already resolved. A diagnostic
+        # step must never add a second, misleading failure of its own.
+        env:
+          # Empty whenever the run failed before the destination was resolved.
+          RESOLVED_SIM_UDID: ${{ steps.resolve-sim.outputs.sim_udid }}
+        run: |
+          set -uxo pipefail
+          SIM_UDID="$RESOLVED_SIM_UDID"
+          echo "::group::Simulator logs (last 200 lines)"
+          if [ -n "$SIM_UDID" ]; then
+            xcrun simctl spawn "$SIM_UDID" log show --last 2m --predicate 'subsystem CONTAINS "com.apple.dt.XCTest" OR process CONTAINS "KeriWallet"' 2>/dev/null | tail -200 || echo "SIM_LOG_FAILED"
+          else
+            echo "NO_SIMULATOR_AVAILABLE_FOR_DIAGNOSTICS"
+          fi
+          echo "::endgroup::"
+
+          echo "::group::Crash reports"
+          find ~/Library/Logs/DiagnosticReports -name 'KeriWallet*' -mmin -30 -print -exec cat {} \; 2>/dev/null || echo "NO_CRASH_REPORTS"
+          echo "::endgroup::"
+
+          echo "::group::dyld reports"
+          find ~/Library/Logs/DiagnosticReports -name '*.dyld_*' -mmin -30 -print -exec cat {} \; 2>/dev/null || echo "NO_DYLD_REPORTS"
+          echo "::endgroup::"
+
+      - name: Upload native bundle failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@26f96dfa697d77e81fd5907df203aa23a56210a8 # v4.3.0
+        with:
+          name: native-bundle-diagnostics
+          path: |
+            ~/Library/Logs/DiagnosticReports/KeriWallet*
+            ~/Library/Logs/DiagnosticReports/*.dyld_*
+          if-no-files-found: ignore
+
+      - name: Upload Swift test results
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@26f96dfa697d77e81fd5907df203aa23a56210a8 # v4.3.0
+        with:
+          name: swift-test-results
+          path: ${{ env.RESULT_BUNDLE_PATH }}
+          if-no-files-found: ignore
+
+  archive-proof:
+    runs-on: macos-26
+    timeout-minutes: 45
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.5.app/Contents/Developer
+      FORTWEB_DIR: ${{ github.workspace }}/.deps/fortweb
+      FORTWEB_RUNTIME_SOURCE_URL: https://github.com/keri-foundation/fortweb/releases/download/runtime-source-pyodide-314-20260909/runtime-source.tar.gz
+      FORTWEB_RUNTIME_SOURCE_ARCHIVE_SHA256: e04833249eec88596e0f2f88d32baa6d5fae6b2e964996587061ddac4bd78c72
+      FORTWEB_RUNTIME_SOURCE_MANIFEST: build/runtime-source/manifest.json
+      FORTWEB_RUNTIME_SOURCE_MANIFEST_SHA256: 87bcc689d7778840a76284471ff599cef21be41df2b429724f7f4fdc5f022135
+      FORTWEB_PACKAGE_REF: refs/heads/pyodide-314-runtime
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Check out FortWeb dependency
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
+        with:
+          persist-credentials: false
+          repository: keri-foundation/fortweb
+          ref: bdb81afa7593603141e8db306f0636a583d2db02
+          path: .deps/fortweb
+
+      - name: Set up Node
+        uses: actions/setup-node@60edb5dd545a775178f52524783378180af0d1f8
+        with:
+          node-version: '22.12.0'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Set up Python
+        # ACTION_PIN_UNVERIFIED resolved: v5 is a lightweight tag on
+        # a26af69be951a213d495a4c3e4e4022e16d87065.
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+
+      - name: Build canonical FortWeb runtime
+        run: |
+          npm ci --prefix "$FORTWEB_DIR"
+          (cd "$FORTWEB_DIR" && python3 scripts/acquire_runtime_source.py \
+            --url "$FORTWEB_RUNTIME_SOURCE_URL" \
+            --sha256 "$FORTWEB_RUNTIME_SOURCE_ARCHIVE_SHA256" \
+            --manifest-sha256 "$FORTWEB_RUNTIME_SOURCE_MANIFEST_SHA256" \
+            --output build/runtime-source)
+          python3 -m pip install --disable-pip-version-check --no-index --no-deps \
+            "$FORTWEB_DIR/build/runtime-source/wheelhouse/packaging-26.1-py3-none-any.whl" \
+            "$FORTWEB_DIR/build/runtime-source/wheelhouse/setuptools-83.0.0-py3-none-any.whl" \
+            "$FORTWEB_DIR/build/runtime-source/wheelhouse/wheel-0.47.0-py3-none-any.whl"
+          (cd "$FORTWEB_DIR" && npm run build:runtime && \
+            FORTWEB_RUNTIME_SOURCE_MANIFEST="$FORTWEB_RUNTIME_SOURCE_MANIFEST" \
+            FORTWEB_RUNTIME_SOURCE_MANIFEST_SHA256="$FORTWEB_RUNTIME_SOURCE_MANIFEST_SHA256" \
+            npm run package:runtime -- --runtime-dir dist/runtime --python python3 --output-dir dist/package --ref "$FORTWEB_PACKAGE_REF")
+          test -f "$FORTWEB_DIR/dist/package/fortweb-runtime-0.0.0.zip"
+
+      - name: Enforce wrapper payload contract (import + validate)
+        run: make payload-contract
+
+      - name: Run release archive verifier unit tests
+        run: npx vitest run tools/__tests__/release-archive.test.mjs
+
+      - name: Build unsigned Release archive
+        timeout-minutes: 25
+        run: |
+          xcodebuild archive \
+            -project KeriWallet.xcodeproj \
+            -scheme KeriWallet \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/KeriWallet.xcarchive \
+            -derivedDataPath build/DerivedData-device \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Verify archived payload integrity (PR lane)
+        # PR lane: wrapper-owned invariants are enforced. Producer-owned findings
+        # (for example the FortWeb itms-services payload defect) are reported here
+        # and enforced by .github/workflows/release-certification.yml instead.
+        run: node tools/assert-release-archive.mjs --archive build/KeriWallet.xcarchive

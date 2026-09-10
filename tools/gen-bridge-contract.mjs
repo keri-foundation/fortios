@@ -3,9 +3,8 @@
 // gen-bridge-contract.mjs
 //
 // Reads bridge-contract.json and generates:
-//   1. src/bridge-contract.ts     — TypeScript string constants
-//   2. xcodeproj/KeriWallet/KeriWallet/BridgeContract.swift — Swift constants
-//   3. generated/BridgeContract.kt — Kotlin constants (for Fort-android)
+//   1. KeriWallet/BridgeContract.swift — Swift constants
+//   2. generated/BridgeContract.kt — Kotlin constants (for Fort-android)
 //
 // Run: node tools/gen-bridge-contract.mjs
 // CI:  node tools/gen-bridge-contract.mjs --check  (exits 1 if generated files are stale)
@@ -18,8 +17,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '..');
 
 const contractPath = resolve(ROOT, 'bridge-contract.json');
-const tsOutPath = resolve(ROOT, 'src', 'bridge-contract.ts');
-const swiftOutPath = resolve(ROOT, 'xcodeproj', 'KeriWallet', 'KeriWallet', 'BridgeContract.swift');
+const swiftOutPath = resolve(ROOT, 'KeriWallet', 'BridgeContract.swift');
 const kotlinOutPath = resolve(ROOT, 'generated', 'BridgeContract.kt');
 
 const contract = JSON.parse(readFileSync(contractPath, 'utf-8'));
@@ -37,69 +35,6 @@ function toScreamingSnake(s) {
 function toPascalCase(s) {
     return s.split('_').map(p => p.charAt(0).toUpperCase() + p.slice(1)).join('');
 }
-// ── Generate TypeScript ─────────────────────────────────────────────────────
-function generateTypeScript() {
-    const lines = [
-        '// ── AUTO-GENERATED — do not edit manually ──────────────────────────────────',
-        '// Source: bridge-contract.json',
-        '// Regenerate: node tools/gen-bridge-contract.mjs',
-        '',
-        '// ── Contract version ────────────────────────────────────────────────────────',
-        `export const BRIDGE_CONTRACT_VERSION = ${JSON.stringify(contract.version)} as const;`,
-        '',
-        '// ── Bridge handler ──────────────────────────────────────────────────────────',
-        `export const BRIDGE_HANDLER_NAME = ${JSON.stringify(contract.bridge.handlerName)} as const;`,
-        '',
-    ];
-
-    // Lifecycle states
-    if (contract.lifecycleStates) {
-        lines.push('// ── Lifecycle states ────────────────────────────────────────────────────────');
-        for (const s of contract.lifecycleStates) {
-            lines.push(`export const LIFECYCLE_${toScreamingSnake(s)} = ${JSON.stringify(s)} as const;`);
-        }
-        lines.push('', 'export const LIFECYCLE_STATES = [');
-        for (const s of contract.lifecycleStates) {
-            lines.push(`    LIFECYCLE_${toScreamingSnake(s)},`);
-        }
-        lines.push('] as const;', '');
-    }
-
-    lines.push('// ── Bridge message types (JS → Swift) ──────────────────────────────────────');
-
-    for (const t of contract.bridgeMessageTypes) {
-        lines.push(`export const BRIDGE_${toScreamingSnake(t)} = ${JSON.stringify(t)} as const;`);
-    }
-
-    lines.push('', 'export const BRIDGE_MESSAGE_TYPES = [');
-    for (const t of contract.bridgeMessageTypes) {
-        lines.push(`    BRIDGE_${toScreamingSnake(t)},`);
-    }
-    lines.push('] as const;', '');
-
-    lines.push('// ── Worker command types (main → worker) ────────────────────────────────────');
-    for (const t of contract.workerCommandTypes) {
-        lines.push(`export const WORKER_CMD_${toScreamingSnake(t)} = ${JSON.stringify(t)} as const;`);
-    }
-    lines.push('', 'export const WORKER_COMMAND_TYPES = [');
-    for (const t of contract.workerCommandTypes) {
-        lines.push(`    WORKER_CMD_${toScreamingSnake(t)},`);
-    }
-    lines.push('] as const;', '');
-
-    lines.push('// ── Worker result types (worker → main) ─────────────────────────────────────');
-    for (const t of contract.workerResultTypes) {
-        lines.push(`export const WORKER_RES_${toScreamingSnake(t)} = ${JSON.stringify(t)} as const;`);
-    }
-    lines.push('', 'export const WORKER_RESULT_TYPES = [');
-    for (const t of contract.workerResultTypes) {
-        lines.push(`    WORKER_RES_${toScreamingSnake(t)},`);
-    }
-    lines.push('] as const;', '');
-
-    return lines.join('\n');
-}
-
 // ── Generate Swift ──────────────────────────────────────────────────────────
 function generateSwift() {
     const lines = [
@@ -108,7 +43,7 @@ function generateSwift() {
         '// Regenerate: node tools/gen-bridge-contract.mjs',
         '//',
         '// This file provides the cross-language bridge constants. Values here must',
-        '// match the TypeScript side (src/bridge-contract.ts) exactly.',
+        '// Bridge constants must match the JS-visible bridge surface exactly.',
         '',
         'import Foundation',
         '',
@@ -186,7 +121,7 @@ function generateKotlin() {
         '// Regenerate: node tools/gen-bridge-contract.mjs',
         '//',
         '// This file provides the cross-language bridge constants for Android.',
-        '// Values here must match the TypeScript side (src/bridge-contract.ts) exactly.',
+        '// Values here must match the Swift-side bridge constants exactly.',
         '',
         'package org.kerifoundation.fort.bridge',
         '',
@@ -259,7 +194,6 @@ function generateKotlin() {
 }
 
 // ── Main ────────────────────────────────────────────────────────────────────
-const tsContent = generateTypeScript();
 const swiftContent = generateSwift();
 const kotlinContent = generateKotlin();
 const isCheck = process.argv.includes('--check');
@@ -267,10 +201,6 @@ const isCheck = process.argv.includes('--check');
 if (isCheck) {
     let stale = false;
 
-    if (!existsSync(tsOutPath) || readFileSync(tsOutPath, 'utf-8') !== tsContent) {
-        console.error(`STALE: ${tsOutPath}`);
-        stale = true;
-    }
     if (!existsSync(swiftOutPath) || readFileSync(swiftOutPath, 'utf-8') !== swiftContent) {
         console.error(`STALE: ${swiftOutPath}`);
         stale = true;
@@ -288,9 +218,6 @@ if (isCheck) {
     console.log('Bridge contract files are up to date.');
     process.exit(0);
 }
-
-writeFileSync(tsOutPath, tsContent, 'utf-8');
-console.log(`wrote ${tsOutPath}`);
 
 writeFileSync(swiftOutPath, swiftContent, 'utf-8');
 console.log(`wrote ${swiftOutPath}`);
