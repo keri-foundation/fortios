@@ -38,3 +38,28 @@ __pycache__/
 # Test output
 test-results/
 .pytest_cache/
+
+# Release candidates and distribution artifacts (generated, environment-specific)
+*.xcarchive
+*.ipa
+*.dSYM
+
+# Runtime producer checkout (populated by CI and local packaging runs)
+.deps/
+
+# Secret-sensitive material. Templates carry no values and stay committable.
+.env
+.env.*
+!.env.example
+*.p12
+*.pfx
+
+# Build logs and scratch output
+*.log
+*.tmp
+*.bak
+*.orig
+
+# Xcode per-user state (directory form used inside .xcodeproj) and SwiftPM cache
+xcuserdata/
+.swiftpm/

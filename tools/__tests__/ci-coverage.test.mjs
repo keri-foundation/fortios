@@ -26,12 +26,16 @@ const baselinePath = path.join(repoRoot, '.swiftlint-baseline.json');
  * identified as uncovered are included explicitly.
  */
 const REQUIRED_TRIGGER_PATHS = [
-    '.github/workflows/ios-security.yml',
+    // Any workflow edit must re-run validation: these contract tests assert
+    // workflow structure, so a change to a workflow file cannot bypass them.
+    '.github/workflows/**',
     '.tool-versions',
     '.swiftlint.yml',
     '.swiftlint-baseline.json',
+    '.gitignore',
     'Makefile',
     'bridge-contract.json',
+    'knip.jsonc',
     'package.json',
     'package-lock.json',
     'vitest.config.ts',
@@ -142,6 +146,16 @@ describe('iOS security workflow trigger coverage', () => {
         const workflow = readWorkflow();
         expect(workflow).not.toContain("'xcodeproj/**'");
         expect(existsSync(path.join(repoRoot, 'KeriWallet.xcodeproj', 'project.pbxproj'))).toBe(true);
+    });
+
+    it('triggers on the release policy so a policy edit cannot skip validation', () => {
+        const workflow = readWorkflow();
+        const pullRequestPaths = triggerPaths(workflow, '  pull_request:', '  push:');
+
+        // The sanitization policy lives in tools/ and drives every release
+        // assertion; tools/** coverage is what keeps a policy edit reviewable.
+        expect(pullRequestPaths).toContain('tools/**');
+        expect(existsSync(path.join(repoRoot, 'tools', 'release-sanitization-policy.json'))).toBe(true);
     });
 });
 

@@ -34,7 +34,7 @@ DEVICE_REF    ?=
 # FortWeb-driven Xcode preparation
 XCODE_READY_TESTS ?= 1
 
-.PHONY: help setup payload-contract payload-package payload-import bridge-check ios-doctor ios-resolve-sim ios-list-sims ios-list-devices xcode-ready run-sim build test-swift test-swift-build test-swift-run test-tools test-all open lint lint-baseline release-content-check generated-check clean clean-payload clean-all doctor archive archive-structural archive-verify export upload
+.PHONY: help setup payload-contract payload-package payload-import bridge-check ios-doctor ios-resolve-sim ios-list-sims ios-list-devices xcode-ready run-sim build test-swift test-swift-build test-swift-run test-tools test-all open lint lint-baseline knip repo-hygiene release-certify release-content-check generated-check clean clean-payload clean-all doctor archive archive-structural archive-verify export upload
 
 help: ## Show available make targets
 	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | \
@@ -268,6 +268,21 @@ lint-baseline: ## Regenerate the SwiftLint violation baseline (only when deliber
 
 release-content-check: ## Scan staged WebPayload (incl. nested archives) for App Store-gated content
 	cd $(CURDIR) && node tools/scan-release-content.mjs --dir WebPayload
+
+knip: ## Report unused files, exports, dependencies, and unlisted binaries
+	npm run knip
+
+repo-hygiene: ## Verify the tracked Git tree carries no generated, local-only, or secret material
+	cd $(CURDIR) && node tools/assert-repo-hygiene.mjs
+
+# Release certification enforces every invariant, including the producer-owned
+# ones the PR lane only reports. It is expected to fail while the canonical
+# FortWeb runtime still carries unsanitized payload content.
+release-certify: ## Certify a candidate archive (enforces producer-owned gates); ARCHIVE_PATH=...
+	cd $(CURDIR) && node tools/assert-release-archive.mjs \
+	  --archive $(ARCHIVE_PATH) \
+	  --release-certification \
+	  --evidence build/release-evidence.json
 
 generated-check: ## Verify generated bridge contracts are current and deterministic
 	npm run bridge:check

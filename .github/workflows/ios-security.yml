@@ -1,18 +1,33 @@
 name: iOS Security Checks
 
+# GitHub Actions hardening notes:
+#   - Every action is pinned to a full commit SHA, except actions/setup-python,
+#     which is ACTION_PIN_UNVERIFIED: its v5 commit SHA could not be resolved
+#     while this workflow was hardened. Replace the floating tag with a verified
+#     SHA as soon as the mapping can be confirmed.
+#   - This workflow declares read-only token permissions. Repository defaults
+#     are irrelevant here because an explicit block makes every unlisted scope
+#     none.
+#   - Validation jobs must not persist checkout credentials: no step pushes.
+#   - This is the PR lane. It does not certify a release candidate; producer
+#     owned payload defects are reported here and enforced by
+#     release-certification.yml.
+
 permissions:
   contents: read
 
 on:
   pull_request:
     paths:
-      - '.github/workflows/ios-security.yml'
+      - '.github/workflows/**'
       - '.tool-versions'
       - '.swiftlint.yml'
       - '.swiftlint-baseline.json'
+      - '.gitignore'
       - 'Makefile'
       - 'README.md'
       - 'bridge-contract.json'
+      - 'knip.jsonc'
       - 'package.json'
       - 'package-lock.json'
       - 'vitest.config.ts'
@@ -30,13 +45,15 @@ on:
     branches:
       - main
     paths:
-      - '.github/workflows/ios-security.yml'
+      - '.github/workflows/**'
       - '.tool-versions'
       - '.swiftlint.yml'
       - '.swiftlint-baseline.json'
+      - '.gitignore'
       - 'Makefile'
       - 'README.md'
       - 'bridge-contract.json'
+      - 'knip.jsonc'
       - 'package.json'
       - 'package-lock.json'
       - 'vitest.config.ts'
@@ -55,6 +72,7 @@ on:
 jobs:
   payload-checks:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
       FORTWEB_DIR: ${{ github.workspace }}/.deps/fortweb
       FORTWEB_RUNTIME_SOURCE_URL: https://github.com/keri-foundation/fortweb/releases/download/runtime-source-pyodide-314-20260909/runtime-source.tar.gz
@@ -67,11 +85,13 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
         with:
+          persist-credentials: false
           fetch-depth: 0
 
       - name: Check out FortWeb dependency
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
         with:
+          persist-credentials: false
           repository: keri-foundation/fortweb
           ref: bdb81afa7593603141e8db306f0636a583d2db02
           path: .deps/fortweb
@@ -129,6 +149,12 @@ jobs:
       - name: Run Node tool tests (Vitest)
         run: make test-tools
 
+      - name: Report unused code and dependencies (Knip)
+        run: make knip
+
+      - name: Verify tracked-tree hygiene
+        run: make repo-hygiene
+
   swift-tests:
     runs-on: macos-26
     timeout-minutes: 45
@@ -147,6 +173,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
+        with:
+          persist-credentials: false
 
       - name: Install SwiftLint
         run: brew install swiftlint
@@ -154,12 +182,14 @@ jobs:
       - name: Lint Swift sources
         # Same entrypoint as local validation: SwiftLint with the corrected
         # source paths and the frozen backlog baseline, failing only on new
-        # violations.
+        # violations. Baselines are reviewed inputs: CI consumes them and never
+        # regenerates them. `make lint-baseline` is a local-only target.
         run: make lint
 
       - name: Check out FortWeb dependency
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
         with:
+          persist-credentials: false
           repository: keri-foundation/fortweb
           ref: bdb81afa7593603141e8db306f0636a583d2db02
           path: .deps/fortweb
@@ -244,7 +274,7 @@ jobs:
 
       - name: Upload native bundle failure diagnostics
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@26f96dfa697d77e81fd5907df203aa23a56210a8 # v4.3.0
         with:
           name: native-bundle-diagnostics
           path: |
@@ -254,7 +284,7 @@ jobs:
 
       - name: Upload Swift test results
         if: failure() || cancelled()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@26f96dfa697d77e81fd5907df203aa23a56210a8 # v4.3.0
         with:
           name: swift-test-results
           path: ${{ env.RESULT_BUNDLE_PATH }}
@@ -276,11 +306,13 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
         with:
+          persist-credentials: false
           fetch-depth: 0
 
       - name: Check out FortWeb dependency
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
         with:
+          persist-credentials: false
           repository: keri-foundation/fortweb
           ref: bdb81afa7593603141e8db306f0636a583d2db02
           path: .deps/fortweb
@@ -335,5 +367,8 @@ jobs:
             -derivedDataPath build/DerivedData-device \
             CODE_SIGNING_ALLOWED=NO
 
-      - name: Verify archived payload integrity
+      - name: Verify archived payload integrity (PR lane)
+        # PR lane: wrapper-owned invariants are enforced. Producer-owned findings
+        # (for example the FortWeb itms-services payload defect) are reported here
+        # and enforced by .github/workflows/release-certification.yml instead.
         run: node tools/assert-release-archive.mjs --archive build/KeriWallet.xcarchive

@@ -392,5 +392,85 @@
         }
       ]
     }
+  },
+  "producer_owned": {
+    "$comment": "Invariants whose remaining defects belong to the canonical FortWeb producer, not to this wrapper. The PR lane reports them and explicitly does NOT certify them; the release-certification lane enforces them. This is not a whitelist: nothing here is silenced, both lanes print the findings, and only release certification can declare an artifact certified. Removing an entry is a policy decision that must be argued on its own merits.",
+    "owning_party": "fortweb",
+    "invariants": {
+      "release-content": "Forbidden release content inside producer-owned runtime payload (for example the Python standard library bundled in python_stdlib.zip). Fixing it requires the canonical producer pipeline to sanitize the payload; this wrapper may not rewrite producer bytes.",
+      "offline-closure": "CDN, loopback, file://, and source-checkout markers inside the producer runtime payload. The Swift layer's deny-all network policy is the enforcement boundary until the producer reduces payload dependency on these markers."
+    }
+  },
+  "repo_hygiene": {
+    "$comment": "Tracked-file boundary for the Git repository itself, not for the release archive. .gitignore is developer convenience and is bypassed by `git add -f`, so this policy is evaluated against `git ls-files`: force-added and already-tracked generated content is still caught. Every exception needs a written reason, and exceptions are path-scoped rather than rule-wide.",
+    "forbidden_tracked_paths": [
+      "build/**",
+      "DerivedData/**",
+      "**/*.xcarchive",
+      "**/*.xcarchive/**",
+      "**/*.ipa",
+      "**/*.dSYM",
+      "**/*.dSYM/**",
+      "**/xcuserdata/**",
+      "**/*.xcuserstate",
+      "node_modules/**",
+      ".deps/**",
+      "test-results/**",
+      "**/.DS_Store",
+      "**/*.log",
+      "**/*.tmp",
+      "**/*.bak",
+      "**/*.orig",
+      "**/*.swp"
+    ],
+    "forbidden_tracked_names": [
+      ".env",
+      ".env.*",
+      "id_rsa",
+      "id_ed25519",
+      "id_ecdsa",
+      "*.p12",
+      "*.pfx"
+    ],
+    "name_exceptions": [
+      {
+        "name": ".env.example",
+        "reason": "Committed template: documents required variables without carrying secret values."
+      }
+    ],
+    "secret_content": {
+      "$comment": "High-confidence markers only, matching the archive-level rule set. Generic entropy scanning is deliberately excluded because minified runtime JavaScript, WASM, and lockfiles would produce constant false positives.",
+      "markers": [
+        "-----BEGIN RSA PRIVATE KEY-----",
+        "-----BEGIN EC PRIVATE KEY-----",
+        "-----BEGIN OPENSSH PRIVATE KEY-----",
+        "-----BEGIN PRIVATE KEY-----",
+        "-----BEGIN PGP PRIVATE KEY BLOCK-----"
+      ],
+      "max_scan_bytes": 1048576,
+      "skip_extensions": [
+        ".car",
+        ".gif",
+        ".jpg",
+        ".jpeg",
+        ".pdf",
+        ".png",
+        ".wasm",
+        ".xcarchive",
+        ".xcprivacy",
+        ".xcresult",
+        ".zip"
+      ],
+      "exceptions": [
+        {
+          "pattern": "tools/__tests__/**",
+          "reason": "Validator tests assert that forbidden markers are rejected; those marker strings are test inputs, not credentials."
+        },
+        {
+          "pattern": "tools/release-sanitization-policy.json",
+          "reason": "This policy names the private-key markers it forbids."
+        }
+      ]
+    }
   }
 }

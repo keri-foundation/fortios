@@ -1,0 +1,146 @@
+name: Release Certification
+
+# Certifies an App Store candidate archive. This is deliberately NOT a PR gate.
+#
+# The PR lane (ios-security.yml) enforces wrapper-owned invariants and reports
+# producer-owned findings. This workflow enforces every invariant, including the
+# producer-owned ones, so it is EXPECTED TO FAIL while the canonical FortWeb
+# runtime still ships unsanitized payload content (for example the
+# itms-services defect inside python_stdlib.zip). A red run here is the gate
+# working: the artifact is genuinely unshippable.
+#
+# It never signs, never creates a tag, and never touches App Store Connect or
+# TestFlight. Distribution signing belongs to the signed release-candidate work,
+# which must consume this gate rather than replace it.
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+    inputs:
+      archive_path:
+        description: 'Existing .xcarchive to certify. Blank builds an unsigned Release archive in this run.'
+        required: false
+        default: ''
+
+jobs:
+  certify-archive:
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.5.app/Contents/Developer
+      FORTWEB_DIR: ${{ github.workspace }}/.deps/fortweb
+      FORTWEB_RUNTIME_SOURCE_URL: https://github.com/keri-foundation/fortweb/releases/download/runtime-source-pyodide-314-20260909/runtime-source.tar.gz
+      FORTWEB_RUNTIME_SOURCE_ARCHIVE_SHA256: e04833249eec88596e0f2f88d32baa6d5fae6b2e964996587061ddac4bd78c72
+      FORTWEB_RUNTIME_SOURCE_MANIFEST: build/runtime-source/manifest.json
+      FORTWEB_RUNTIME_SOURCE_MANIFEST_SHA256: 87bcc689d7778840a76284471ff599cef21be41df2b429724f7f4fdc5f022135
+      FORTWEB_PACKAGE_REF: refs/heads/pyodide-314-runtime
+      DEFAULT_ARCHIVE_PATH: build/KeriWallet.xcarchive
+      EVIDENCE_PATH: build/release-evidence.json
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Verify tracked-tree hygiene
+        # A release candidate must not be produced from a tracked tree carrying
+        # generated or secret material.
+        run: make repo-hygiene
+
+      - name: Check out FortWeb dependency
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
+        with:
+          persist-credentials: false
+          repository: keri-foundation/fortweb
+          ref: bdb81afa7593603141e8db306f0636a583d2db02
+          path: .deps/fortweb
+
+      - name: Set up Node
+        uses: actions/setup-node@60edb5dd545a775178f52524783378180af0d1f8
+        with:
+          node-version: '22.12.0'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Set up Python
+        # ACTION_PIN_UNVERIFIED: same pin state as ios-security.yml.
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build canonical FortWeb runtime
+        run: |
+          npm ci --prefix "$FORTWEB_DIR"
+          (cd "$FORTWEB_DIR" && python3 scripts/acquire_runtime_source.py \
+            --url "$FORTWEB_RUNTIME_SOURCE_URL" \
+            --sha256 "$FORTWEB_RUNTIME_SOURCE_ARCHIVE_SHA256" \
+            --manifest-sha256 "$FORTWEB_RUNTIME_SOURCE_MANIFEST_SHA256" \
+            --output build/runtime-source)
+          python3 -m pip install --disable-pip-version-check --no-index --no-deps \
+            "$FORTWEB_DIR/build/runtime-source/wheelhouse/packaging-26.1-py3-none-any.whl" \
+            "$FORTWEB_DIR/build/runtime-source/wheelhouse/setuptools-83.0.0-py3-none-any.whl" \
+            "$FORTWEB_DIR/build/runtime-source/wheelhouse/wheel-0.47.0-py3-none-any.whl"
+          (cd "$FORTWEB_DIR" && npm run build:runtime && \
+            FORTWEB_RUNTIME_SOURCE_MANIFEST="$FORTWEB_RUNTIME_SOURCE_MANIFEST" \
+            FORTWEB_RUNTIME_SOURCE_MANIFEST_SHA256="$FORTWEB_RUNTIME_SOURCE_MANIFEST_SHA256" \
+            npm run package:runtime -- --runtime-dir dist/runtime --python python3 --output-dir dist/package --ref "$FORTWEB_PACKAGE_REF")
+          test -f "$FORTWEB_DIR/dist/package/fortweb-runtime-0.0.0.zip"
+
+      - name: Enforce wrapper payload contract (import + validate)
+        # The reference payload must exist in-run: byte identity compares the
+        # archived payload against it.
+        run: make payload-contract
+
+      - name: Select candidate archive
+        # PR-controlled and dispatch-controlled values reach shell through the
+        # environment, never through direct interpolation into the command.
+        env:
+          ARCHIVE_PATH_INPUT: ${{ inputs.archive_path }}
+        run: |
+          set -euo pipefail
+          if [ -n "$ARCHIVE_PATH_INPUT" ]; then
+            echo "CANDIDATE_ARCHIVE=$ARCHIVE_PATH_INPUT" >> "$GITHUB_ENV"
+          else
+            echo "CANDIDATE_ARCHIVE=$DEFAULT_ARCHIVE_PATH" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build unsigned Release archive
+        if: inputs.archive_path == ''
+        timeout-minutes: 30
+        # No signing credentials are used here, and deliberately so: this gate
+        # certifies structure, payload identity, declarations, and content. A
+        # signed distribution candidate is certified by the release-candidate
+        # lane, which must run this same assertion against its signed artifact.
+        run: |
+          xcodebuild archive \
+            -project KeriWallet.xcodeproj \
+            -scheme KeriWallet \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$DEFAULT_ARCHIVE_PATH" \
+            -derivedDataPath build/DerivedData-device \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Certify candidate archive
+        # Exit code 1 here is the gate working: it means the artifact is not
+        # shippable. Do not add a continue-on-error escape hatch.
+        run: |
+          node tools/assert-release-archive.mjs \
+            --archive "$CANDIDATE_ARCHIVE" \
+            --release-certification \
+            --evidence "$EVIDENCE_PATH"
+
+      - name: Upload release evidence
+        if: always()
+        uses: actions/upload-artifact@26f96dfa697d77e81fd5907df203aa23a56210a8 # v4.3.0
+        with:
+          name: release-certification-evidence
+          path: ${{ env.EVIDENCE_PATH }}
+          if-no-files-found: warn
+          retention-days: 90

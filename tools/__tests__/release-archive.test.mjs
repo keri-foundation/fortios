@@ -115,22 +115,33 @@ async function buildFixtureArchive() {
     return { root, archivePath, appPath, payloadRoot, referenceRoot };
 }
 
-async function runVerifier(archivePath, referenceRoot) {
+async function runVerifier(archivePath, referenceRoot, extraArgs = []) {
     return execFile('node', [
         verifierScript,
         '--archive', archivePath,
         '--reference-payload', referenceRoot,
         '--skip-delegated-validators',
+        ...extraArgs,
     ], { cwd: repoRoot, encoding: 'utf8' });
 }
 
-async function runVerifierExpectFailure(archivePath, referenceRoot) {
+async function runVerifierExpectFailure(archivePath, referenceRoot, extraArgs = []) {
     try {
-        await runVerifier(archivePath, referenceRoot);
+        await runVerifier(archivePath, referenceRoot, extraArgs);
     } catch (error) {
         return error;
     }
     throw new Error('Expected assert-release-archive.mjs to fail');
+}
+
+/**
+ * Inject forbidden release content into BOTH trees so byte identity still
+ * holds and only the producer-owned content gate can fire.
+ */
+async function injectForbiddenReleaseContent(payloadRoot, referenceRoot) {
+    const injected = 'const legacy = "itms-services";\n';
+    await writeTextFile(path.join(payloadRoot, 'app', 'app', 'main.js'), injected);
+    await writeTextFile(path.join(referenceRoot, 'app', 'app', 'main.js'), injected);
 }
 
 afterEach(async () => {
@@ -209,5 +220,63 @@ describe('assert-release-archive.mjs', () => {
         const error = await runVerifierExpectFailure(archivePath, referenceRoot);
         expect(error.stdout).toContain('privacy manifest is missing or unreadable');
         expect(error.stdout).toContain('[release-archive] result: FAIL');
+    });
+
+    it('reports producer-owned content findings in the PR lane without enforcing them', async () => {
+        const { archivePath, payloadRoot, referenceRoot } = await buildFixtureArchive();
+        await injectForbiddenReleaseContent(payloadRoot, referenceRoot);
+
+        const { stdout } = await runVerifier(archivePath, referenceRoot);
+
+        // The finding is still reported, never silenced — and the PR lane says
+        // plainly that it did not certify anything.
+        expect(stdout).toContain('release-content finding');
+        expect(stdout).toContain('itms-services');
+        expect(stdout).toContain('producer-owned findings not enforced in this lane');
+        expect(stdout).toContain('[release-archive] result: PASS');
+        expect(stdout).toContain('certification: NOT_CERTIFIED');
+        expect(stdout).not.toContain('certification: CERTIFIED');
+    });
+
+    it('enforces producer-owned content findings during release certification', async () => {
+        const { archivePath, payloadRoot, referenceRoot } = await buildFixtureArchive();
+        await injectForbiddenReleaseContent(payloadRoot, referenceRoot);
+
+        const error = await runVerifierExpectFailure(archivePath, referenceRoot, ['--release-certification']);
+
+        expect(error.stdout).toContain('lane: release-certification');
+        expect(error.stdout).toContain('kind: release-content');
+        expect(error.stdout).toContain('[release-archive] result: FAIL');
+        expect(error.stdout).toContain('certification: NOT_CERTIFIED');
+    });
+
+    it('still enforces wrapper-owned violations during release certification', async () => {
+        const { archivePath, payloadRoot, referenceRoot } = await buildFixtureArchive();
+        const mainPath = path.join(payloadRoot, 'app', 'app', 'main.js');
+        await writeTextFile(mainPath, 'console.log("corrupted");');
+
+        const error = await runVerifierExpectFailure(archivePath, referenceRoot, ['--release-certification']);
+
+        expect(error.stdout).toContain('SHA-256 mismatch');
+        expect(error.stdout).toContain('certification: NOT_CERTIFIED');
+    });
+
+    it('writes release evidence naming the lane, source commit, and archive digest', async () => {
+        const { root, archivePath, referenceRoot } = await buildFixtureArchive();
+        const evidencePath = path.join(root, 'release-evidence.json');
+
+        const { stdout } = await runVerifier(archivePath, referenceRoot, ['--evidence', evidencePath]);
+        const evidence = JSON.parse(await readFile(evidencePath, 'utf8'));
+
+        expect(stdout).toContain('evidence written');
+        expect(evidence.schema).toBe('fort.ios-release-evidence.v1');
+        expect(evidence.lane).toBe('pr');
+        expect(evidence.result).toBe('PASS');
+        expect(evidence.certified).toBe(false);
+        // Null only when Git is unavailable; otherwise a full commit SHA.
+        expect(evidence.sourceCommitSha === null || /^[0-9a-f]{40}$/.test(evidence.sourceCommitSha)).toBe(true);
+        expect(evidence.archiveSha256).toMatch(/^[0-9a-f]{64}$/);
+        expect(evidence.archiveFileCount).toBeGreaterThan(0);
+        expect(evidence.summary.bundle.fileCount).toBeGreaterThan(0);
     });
 });

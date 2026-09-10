@@ -11,14 +11,49 @@ ships unverified. Status meanings:
 `make release-content-check` and `node tools/assert-release-archive.mjs --archive <path.xcarchive>`
 enforce the automated parts (release content, bundle structure, submission declarations).
 
+## 0. Gate lanes and the trust chain
+
+Checks are grouped by the trust boundary they protect. Confusing the lanes is how a gate
+starts lying: a PR-lane pass is not a release certification, and a certification failure is
+not a PR regression.
+
+| Lane | Where it runs | What it enforces |
+|---|---|---|
+| AUTOMATED PR GATE | `ios-security.yml`, `repo-hygiene.yml` on every relevant PR | Wrapper-owned invariants: payload identity and contract, bundle structure, submission declarations, SwiftLint, Knip, tracked-tree hygiene |
+| AUTOMATED RELEASE GATE | `release-certification.yml` (`workflow_dispatch` only) | Every invariant, including producer-owned payload content. Expected to fail while the canonical FortWeb runtime is unsanitized |
+| RELEASE-CANDIDATE MANUAL / APPLE GATE | Organizer, App Store Connect, TestFlight | Signing, entitlements, privacy nutrition labels, export compliance, review access |
+
+The intended chain, with the owner of each step:
+
+```
+source / PR                     wrapper
+  -> deterministic CI           wrapper
+  -> trusted release build      wrapper
+  -> final archive assertion    wrapper
+  -> distribution signing       release candidate (not yet started)
+  -> TestFlight                 release candidate
+  -> App Store Connect review   owner + Apple
+```
+
+A PR-lane pass prints `certification: NOT_CERTIFIED` on purpose. Only
+`--release-certification` can print `CERTIFIED`.
+
 ## 1. Automated gates (repository-enforceable)
 
-| Gate | What it proves | Status |
-|---|---|---|
-| Privacy manifest structure | `PrivacyInfo.xcprivacy` present at app root, valid plist, only Apple's four top-level keys, known API categories with approved reason codes | VERIFIED (validator + tests) |
-| Required-reason coverage | Every observed first-party API category is declared; declared-but-unused categories reported as stale | VERIFIED (static scan; UserDefaults currently reported stale — see §3) |
-| Capability closure | No broad ATS bypass, no undeclared permission purpose strings, URL schemes, background modes, Bonjour, local network, or document exposure | VERIFIED (validator + tests) |
-| Bundle structure and content | Cruft closure, nested-archive allowlist, canonical payload identity, secrets, size budgets, release content | VERIFIED (see `release-sanitization-policy.json`) |
+| Gate | Lane | What it proves | Status |
+|---|---|---|---|
+| Tracked-tree hygiene | PR | `build/`, derived data, archives, `.deps/`, `.env`, private keys, and credential bundles are absent from `git ls-files`, including files added with `git add -f` | VERIFIED (validator + tests; `.gitignore` is convenience, this gate is the boundary) |
+| Privacy manifest structure | PR + release | `PrivacyInfo.xcprivacy` present at app root, valid plist, only Apple's four top-level keys, known API categories with approved reason codes | VERIFIED (validator + tests) |
+| Required-reason coverage | PR + release | Every observed first-party API category is declared; declared-but-unused categories reported as stale | VERIFIED (static scan; UserDefaults currently reported stale — see §3) |
+| Capability closure | PR + release | No broad ATS bypass, no undeclared permission purpose strings, URL schemes, background modes, Bonjour, local network, or document exposure | VERIFIED (validator + tests) |
+| Bundle structure and payload identity | PR + release | Cruft closure, nested-archive allowlist, canonical payload byte identity, secrets, size budgets | VERIFIED (see `release-sanitization-policy.json`) |
+| Release content (forbidden markers) | Release only | No `itms-services` (or other gated marker) anywhere in the payload, including inside nested ZIPs | ENFORCED IN CERTIFICATION — currently FAILING on producer-owned `python_stdlib.zip` |
+| Offline runtime closure | Release only | No CDN, loopback, `file://`, or source-checkout dependency in the runtime payload | ENFORCED IN CERTIFICATION — producer-owned debt reported in the PR lane |
+
+Producer-owned invariants are declared in `producer_owned` in
+`tools/release-sanitization-policy.json`. They are reported in both lanes and enforced by
+certification, so a red certification run on an unshippable artifact is the gate working, not
+a defect in CI.
 
 ## 2. App Store Connect (manual)
 
@@ -104,3 +139,12 @@ closure, not native SDK frameworks.
 
 Distribution-signature proof (`codesign` identity per code item) is deferred to the release
 candidate slice, because this repository's CI archives are intentionally unsigned.
+
+## 8. Workflow hardening exceptions
+
+| Item | Status | Note |
+|---|---|---|
+| Action pinning | ACTION_PIN_UNVERIFIED (1 of 5 refs) | `actions/checkout`, `actions/setup-node`, and `actions/upload-artifact` are pinned to full commit SHAs. `actions/setup-python` still floats on `v5`: its commit SHA could not be resolved while the workflows were hardened, and inventing one is worse than recording it. `tools/__tests__/workflow-security.test.mjs` fails if any other action floats, and fails if this exception is removed without resolving the pin |
+| Signing credentials in CI | NOT_APPLICABLE | Every CI archive is built with `CODE_SIGNING_ALLOWED=NO`; no certificate, key, or provisioning profile is loaded by any workflow |
+| Release evidence | VERIFIED | `release-certification.yml` uploads the assertion evidence (source commit SHA, archive SHA-256, bundle bill of materials, declaration inventory, violations) with 90-day retention |
+| Baseline regeneration in CI | VERIFIED as blocked | `.swiftlint-baseline.json` is a reviewed input. `make lint-baseline` is local-only, and the workflow contract test fails if any workflow invokes it or passes `--write-baseline` |

@@ -7,6 +7,8 @@
   "entry": [
     // Direct-exec CLI validators invoked from the Makefile / GitHub Actions
     // (not from package.json scripts, so Knip cannot infer them automatically).
+    // Validators that are also reachable from a package.json script need no
+    // entry here: Knip resolves those on its own.
     "tools/assert-no-proof-demo-shell.mjs",
     "tools/validate-mobile-payload.mjs"
   ],

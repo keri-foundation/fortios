@@ -33,20 +33,33 @@
  *   runtime payload. The pinned producer currently carries known debt here;
  *   the Swift layer's deny-all network policy is the enforcement boundary.
  *
+ * Two lanes:
+ *
+ *   PR lane (default)
+ *     Enforces every wrapper-owned invariant and reports producer-owned
+ *     findings without enforcing them, because this repository cannot fix
+ *     defects inside canonical producer payload bytes. A PR-lane pass is never
+ *     a release certification.
+ *
+ *   Release certification (--release-certification)
+ *     Enforces every invariant, including the producer-owned ones named in the
+ *     release policy. Only this lane can print CERTIFIED.
+ *
  * Usage:
  *   node tools/assert-release-archive.mjs --archive <path.xcarchive>
  *     [--reference-payload <dir>] [--built-app <path.app>]
- *     [--config <runtime-platform-config.json>]
+ *     [--config <runtime-platform-config.json>] [--policy <file>]
+ *     [--release-certification] [--evidence <path.json>]
  *
  * Exit codes:
- *   0 — archive verified (no hard violations)
- *   1 — hard violation
+ *   0 — archive verified for the selected lane (no enforcing violations)
+ *   1 — enforcing violation
  *   2 — tool error (missing archive, unreadable files, etc.)
  */
 
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
-import { lstat, readFile, readdir } from 'node:fs/promises';
+import { lstat, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
@@ -78,6 +91,8 @@ function parseArgs(argv) {
         config: DEFAULT_CONFIG,
         policy: DEFAULT_POLICY,
         skipDelegatedValidators: false,
+        releaseCertification: false,
+        evidence: null,
     };
     for (let i = 0; i < argv.length; i += 1) {
         const arg = argv[i];
@@ -87,6 +102,8 @@ function parseArgs(argv) {
         if (arg === '--config') { opts.config = path.resolve(argv[++i]); continue; }
         if (arg === '--policy') { opts.policy = path.resolve(argv[++i]); continue; }
         if (arg === '--skip-delegated-validators') { opts.skipDelegatedValidators = true; continue; }
+        if (arg === '--release-certification') { opts.releaseCertification = true; continue; }
+        if (arg === '--evidence') { opts.evidence = path.resolve(argv[++i]); continue; }
         throw new Error(`unknown argument: ${arg}`);
     }
     if (!opts.archive) throw new Error('--archive is required');
@@ -156,6 +173,37 @@ async function listTree(root) {
 
 function violation(kind, target, reason, expected) {
     return { kind, target, reason, expected };
+}
+
+/** Deterministic digest of a directory tree, used for release evidence. */
+async function digestTree(root) {
+    const tree = await listTree(root);
+    const hash = createHash('sha256');
+    let fileCount = 0;
+    let totalBytes = 0;
+
+    for (const relPath of [...tree.keys()].sort()) {
+        const entry = tree.get(relPath);
+        if (entry.symlink) {
+            hash.update(`symlink\0${relPath}\n`);
+            continue;
+        }
+        hash.update(`${relPath}\0${entry.sha256}\n`);
+        fileCount += 1;
+        totalBytes += entry.bytes;
+    }
+
+    return { sha256: hash.digest('hex'), fileCount, totalBytes };
+}
+
+/** Source commit the run was produced from; null when Git is unavailable. */
+async function currentCommitSha() {
+    try {
+        const { stdout } = await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: REPO_ROOT, encoding: 'utf8' });
+        return stdout.trim();
+    } catch {
+        return null;
+    }
 }
 
 // --- structural checks ---------------------------------------------------
@@ -510,14 +558,45 @@ async function main() {
     console.log(`[release-archive] reference payload: ${opts.referencePayload}`);
     console.log(`[release-archive] policy: ${opts.policy}`);
 
+    const lane = opts.releaseCertification ? 'release-certification' : 'pr';
+    const producerOwnedKinds = new Set(Object.keys(policy.producer_owned?.invariants ?? {}));
+    const producerOwner = policy.producer_owned?.owning_party ?? 'upstream-producer';
+    console.log(`[release-archive] lane: ${lane}`);
+    console.log(`[release-archive] producer-owned invariants (owner=${producerOwner}): ${
+        producerOwnedKinds.size > 0 ? [...producerOwnedKinds].join(', ') : 'none'
+    }`);
+
     const hardErrors = [];
+    const producerDebt = [];
+
+    /**
+     * Route a violation to the lane that owns it. Producer-owned invariants are
+     * reported in the PR lane and enforced in release certification; they are
+     * never silenced.
+     */
+    const record = (kind, target, reason, expected) => {
+        const entry = violation(kind, target, reason, expected);
+        if (lane === 'pr' && producerOwnedKinds.has(kind)) {
+            producerDebt.push(entry);
+        } else {
+            hardErrors.push(entry);
+        }
+        return entry;
+    };
+
+    const laneInfo = () => ({
+        lane,
+        certified: lane === 'release-certification' && hardErrors.length === 0,
+        producerDebt: producerDebt.length,
+        producerOwner,
+    });
 
     // 1. Archive structure
     const { errors: locErrors, appPath } = await locateApp(opts.archive, policy);
     hardErrors.push(...locErrors);
     if (!appPath) {
         printViolations(hardErrors);
-        finish(false, null);
+        finish(false, null, laneInfo());
         return;
     }
     console.log(`[release-archive] archived app located: ${appPath}`);
@@ -628,17 +707,19 @@ async function main() {
         releaseContentResult = await scanForbiddenContent(payloadRoot, { policyPath: opts.policy });
         for (const finding of releaseContentResult.findings) {
             console.log(`[release-archive] release-content finding: file=${finding.file} marker=${finding.marker}`);
-            hardErrors.push(violation(
+            record(
                 'release-content',
                 finding.file,
                 `forbidden release content "${finding.marker}": ${finding.reason}`,
                 'Archived payload must not contain release-gate forbidden content; the canonical runtime producer owns the fix',
-            ));
+            );
         }
         for (const error of releaseContentResult.errors) {
             console.log(`[release-archive] release-content inspection error: file=${error.file} reason=${error.reason}`);
+            // Inspection failures are always enforcing: an archive that cannot
+            // be inspected can never be waved through by either lane.
             hardErrors.push(violation(
-                'release-content',
+                'release-content-inspection',
                 error.file,
                 `release content could not be inspected: ${error.reason}`,
                 'Nested archive inspection must succeed; an uninspectable archive cannot be certified clean',
@@ -653,17 +734,38 @@ async function main() {
         ));
     }
 
-    // Offline closure audit (non-fatal)
+    // Offline closure audit: producer-owned, reported in the PR lane and
+    // enforced during release certification.
     const offlineFindings = await auditOfflineClosure(payloadRoot, policy);
     const offlinePass = offlineFindings.length === 0;
     console.log(`[release-archive] offline-closure findings: ${offlineFindings.length}`);
     for (const f of offlineFindings) {
         console.log(`[release-archive] offline-closure finding: file=${f.file} marker=${f.marker} reason=${f.reason}`);
+        record(
+            'offline-closure',
+            f.file,
+            `offline runtime dependency "${f.marker}": ${f.reason}`,
+            'Runtime payload must be closed over offline resources without CDN, loopback, or source-checkout dependencies',
+        );
     }
-    console.log(`[release-archive] offline-closure invariant: ${offlinePass ? 'PASS' : 'FAIL (known producer debt — reported, non-fatal)'}`);
+    console.log(`[release-archive] offline-closure invariant: ${offlinePass
+        ? 'PASS'
+        : lane === 'pr'
+            ? 'FAIL (producer-owned debt — reported, not enforced in the PR lane)'
+            : 'FAIL (enforced by release certification)'}`);
 
     printViolations(hardErrors);
-    finish(hardErrors.length === 0, {
+
+    if (producerDebt.length > 0) {
+        console.log(`[release-archive] producer-owned findings not enforced in this lane: ${producerDebt.length} (owner=${producerOwner})`);
+        for (const entry of producerDebt) {
+            console.log(`  kind=${entry.kind} target=${entry.target}`);
+        }
+        console.log('[release-archive] a PR-lane pass is not a release certification; run --release-certification to enforce these');
+    }
+
+    const passed = hardErrors.length === 0;
+    const summary = {
         archive: opts.archive,
         appPath,
         payloadRoot,
@@ -685,7 +787,31 @@ async function main() {
             : null,
         submission: submissionReport ? submissionReport.details : null,
         delegatedResults,
-    });
+    };
+
+    if (opts.evidence) {
+        const archiveDigest = await digestTree(opts.archive);
+        await mkdir(path.dirname(opts.evidence), { recursive: true });
+        await writeFile(opts.evidence, `${JSON.stringify({
+            schema: 'fort.ios-release-evidence.v1',
+            lane,
+            result: passed ? 'PASS' : 'FAIL',
+            certified: lane === 'release-certification' && passed,
+            sourceCommitSha: await currentCommitSha(),
+            archivePath: opts.archive,
+            archiveSha256: archiveDigest.sha256,
+            archiveFileCount: archiveDigest.fileCount,
+            archiveTotalBytes: archiveDigest.totalBytes,
+            policyPath: opts.policy,
+            producerOwner: producerOwnedKinds.size > 0 ? producerOwner : null,
+            violations: hardErrors,
+            producerOwnedFindings: producerDebt,
+            summary,
+        }, null, 2)}\n`);
+        console.log(`[release-archive] evidence written: ${opts.evidence}`);
+    }
+
+    finish(passed, summary, { ...laneInfo(), certified: lane === 'release-certification' && passed });
 }
 
 function printViolations(errors) {
@@ -698,12 +824,24 @@ function printViolations(errors) {
     }
 }
 
-function finish(passed, summary) {
+function finish(passed, summary, lane = {}) {
     console.log(`[release-archive] result: ${passed ? 'PASS' : 'FAIL'}`);
+    console.log(`[release-archive] lane: ${lane.lane ?? 'pr'}`);
+
     if (!passed) {
+        console.log('[release-archive] certification: NOT_CERTIFIED');
         process.exitCode = 1;
         return;
     }
+
+    if (lane.certified) {
+        console.log('[release-archive] certification: CERTIFIED');
+    } else if (lane.producerDebt > 0) {
+        console.log(`[release-archive] certification: NOT_CERTIFIED (${lane.producerDebt} producer-owned finding(s) reported, owner=${lane.producerOwner})`);
+    } else {
+        console.log('[release-archive] certification: NOT_CERTIFIED (PR lane never certifies a release; run --release-certification)');
+    }
+
     if (summary) {
         console.log('[release-archive] summary');
         console.log(`  archived app located: ${summary.appPath}`);
@@ -712,7 +850,7 @@ function finish(passed, summary) {
         console.log(`  contract validated: true`);
         console.log(`  byte identity validated: true`);
         console.log(`  sanitization passed: true`);
-        console.log(`  offline-closure invariant: ${summary.offlineClosurePass ? 'PASS' : 'FAIL (known producer debt)'}`);
+        console.log(`  offline-closure invariant: ${summary.offlineClosurePass ? 'PASS' : 'FAIL (producer-owned debt)'}`);
     }
 }
 
