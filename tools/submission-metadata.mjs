@@ -29,13 +29,50 @@ const TRACKING_DOMAINS_KEY = 'NSPrivacyTrackingDomains';
 const COLLECTED_DATA_KEY = 'NSPrivacyCollectedDataTypes';
 const ACCESSED_API_KEY = 'NSPrivacyAccessedAPITypes';
 
-/** Read a property list the way Apple's own tooling does. macOS only. */
-export function loadPlist(filePath) {
-    const out = execFileSync('plutil', ['-convert', 'json', '-o', '-', filePath], {
+const PLIST_MAX_BUFFER = 32 * 1024 * 1024;
+
+// plistlib is Python stdlib and reads both the XML and the binary property-list
+// formats, so the Linux PR lane can evaluate the same declarations that macOS
+// evaluates with plutil.
+const PYTHON_PLIST_READER = [
+    'import json, plistlib, sys',
+    'with open(sys.argv[1], "rb") as handle:',
+    '    print(json.dumps(plistlib.load(handle)))',
+].join('\n');
+
+function runPlistReader(command, args) {
+    return execFileSync(command, args, {
         encoding: 'utf8',
-        maxBuffer: 32 * 1024 * 1024,
+        maxBuffer: PLIST_MAX_BUFFER,
     });
-    return JSON.parse(out);
+}
+
+/**
+ * Read a property list with python3's stdlib reader.
+ *
+ * This is the reader used wherever plutil is unavailable (the Linux PR lane).
+ */
+export function loadPlistWithPython(filePath) {
+    return JSON.parse(runPlistReader('python3', ['-c', PYTHON_PLIST_READER, filePath]));
+}
+
+/**
+ * Read a property list.
+ *
+ * plutil is Apple's own reader and is used whenever it exists. It is macOS-only,
+ * so the fallback keeps the declaration checks running on Linux instead of
+ * skipping them. A failure from a reader that is present is a real parse error
+ * and is never swallowed.
+ */
+export function loadPlist(filePath) {
+    try {
+        return JSON.parse(runPlistReader('plutil', ['-convert', 'json', '-o', '-', filePath]));
+    } catch (error) {
+        if (error?.code !== 'ENOENT') {
+            throw error;
+        }
+    }
+    return loadPlistWithPython(filePath);
 }
 
 function isPlainObject(value) {

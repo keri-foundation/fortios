@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
     auditRequiredReasonApis,
@@ -7,6 +8,8 @@ import {
     evaluateInfoPlist,
     evaluatePrivacyManifest,
     evaluateSubmissionMetadata,
+    loadPlist,
+    loadPlistWithPython,
 } from '../submission-metadata.mjs';
 
 /**
@@ -288,5 +291,60 @@ describe('combined evaluation', () => {
         const invariants = result.findings.map((f) => f.invariant);
         expect(invariants).toContain('privacy_manifest');
         expect(invariants).toContain('capability_surface');
+    });
+});
+
+/** The same declaration the shipped Info.plist carries, in XML form. */
+const XML_INFO_PLIST = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDisplayName</key>
+	<string>KeriWallet</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+	<key>MinimumOSVersion</key>
+	<string>16.4</string>
+</dict>
+</plist>
+`;
+
+/** The same declaration in the binary format Xcode ships. */
+const BINARY_INFO_PLIST_BASE64 =
+    'YnBsaXN0MDDTAQIDBAUGXxATQ0ZCdW5kbGVEaXNwbGF5TmFtZV8QHUlUU0FwcFVzZXNOb25FeGVtcHRFbmNyeXB0aW9uXxAQTWluaW11bU9TVmVyc2lvblpLZXJpV2FsbGV0CFQxNi40CA8lRVhjZAAAAAAAAAEBAAAAAAAAAAcAAAAAAAAAAAAAAAAAAABp';
+
+const EXPECTED_INFO_PLIST = {
+    CFBundleDisplayName: 'KeriWallet',
+    ITSAppUsesNonExemptEncryption: false,
+    MinimumOSVersion: '16.4',
+};
+
+/**
+ * The declaration checks must not depend on macOS. The PR lane runs on Linux,
+ * where plutil does not exist, so the stdlib fallback has to read exactly the
+ * same documents as Apple's own tool and has to keep failing on corrupt input.
+ */
+describe('property-list readers', () => {
+    const fixtures = mkdtempSync(path.join(tmpdir(), 'fort-ios-plist-'));
+    const xmlPath = path.join(fixtures, 'Info.xml.plist');
+    const binaryPath = path.join(fixtures, 'Info.binary.plist');
+    const corruptPath = path.join(fixtures, 'Corrupt.plist');
+
+    writeFileSync(xmlPath, XML_INFO_PLIST);
+    writeFileSync(binaryPath, Buffer.from(BINARY_INFO_PLIST_BASE64, 'base64'));
+    writeFileSync(corruptPath, 'this is not a property list\n');
+
+    it('agrees with plutil on an XML property list', () => {
+        expect(loadPlistWithPython(xmlPath)).toEqual(EXPECTED_INFO_PLIST);
+        expect(loadPlist(xmlPath)).toEqual(EXPECTED_INFO_PLIST);
+    });
+
+    it('reads a binary property list through the non-macOS reader', () => {
+        expect(loadPlistWithPython(binaryPath)).toEqual(EXPECTED_INFO_PLIST);
+        expect(loadPlist(binaryPath)).toEqual(EXPECTED_INFO_PLIST);
+    });
+
+    it('still fails loudly on a corrupt property list', () => {
+        expect(() => loadPlist(corruptPath)).toThrow();
     });
 });

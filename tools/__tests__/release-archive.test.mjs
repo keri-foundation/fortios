@@ -116,13 +116,24 @@ async function buildFixtureArchive() {
 }
 
 async function runVerifier(archivePath, referenceRoot, extraArgs = []) {
-    return execFile('node', [
-        verifierScript,
-        '--archive', archivePath,
-        '--reference-payload', referenceRoot,
-        '--skip-delegated-validators',
-        ...extraArgs,
-    ], { cwd: repoRoot, encoding: 'utf8' });
+    try {
+        return await execFile('node', [
+            verifierScript,
+            '--archive', archivePath,
+            '--reference-payload', referenceRoot,
+            '--skip-delegated-validators',
+            ...extraArgs,
+        ], { cwd: repoRoot, encoding: 'utf8' });
+    } catch (error) {
+        // Attach the verifier's own report to the rejection. Otherwise a hosted
+        // run reports only "Command failed" and the cause has to be reproduced
+        // locally before it can be read. The original error is preserved so the
+        // failure-shape assertions below can still inspect stdout and stderr.
+        error.message = [error.message, error.stdout?.trimEnd(), error.stderr?.trimEnd()]
+            .filter(Boolean)
+            .join('\n');
+        throw error;
+    }
 }
 
 async function runVerifierExpectFailure(archivePath, referenceRoot, extraArgs = []) {
