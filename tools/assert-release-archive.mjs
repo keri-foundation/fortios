@@ -51,6 +51,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { scanForbiddenContent } from './scan-release-content.mjs';
+import { inspectBundle } from './bundle-hygiene.mjs';
 
 const execFileAsync = promisify(execFile);
 
@@ -520,6 +521,29 @@ async function main() {
         console.log('[release-archive] delegated validators skipped (--skip-delegated-validators)');
     }
 
+    // Structural bundle hygiene (hard): closed-world contracts for the final
+    // application bundle. Unknown structure is denied rather than enumerated.
+    let bundleReport = null;
+    try {
+        const hygiene = await inspectBundle(appPath, { policyPath: opts.policy });
+        bundleReport = hygiene.bom;
+        for (const finding of hygiene.findings) {
+            console.log(`[release-archive] ${finding.invariant} finding: path=${finding.path} reason=${finding.reason}`);
+            hardErrors.push(violation(finding.invariant, finding.path, finding.reason, 'Final bundle must satisfy the structural release policy'));
+        }
+        for (const error of hygiene.errors) {
+            console.log(`[release-archive] ${error.invariant} inspection error: path=${error.path} reason=${error.reason}`);
+            hardErrors.push(violation(error.invariant, error.path, error.reason, 'Bundle inspection must succeed; an uninspectable bundle cannot be certified'));
+        }
+    } catch (err) {
+        hardErrors.push(violation(
+            'bundle_hygiene',
+            'policy',
+            `bundle hygiene gate could not run: ${err.message}`,
+            'The structural bundle gate must run against every release archive',
+        ));
+    }
+
     // Release content gate (hard): forbidden App Store-incompatible material
     // must be absent from the archived payload, including inside nested
     // archives such as the Pyodide python_stdlib.zip.
@@ -572,6 +596,17 @@ async function main() {
         releaseContentFindings: releaseContentResult ? releaseContentResult.findings.length : null,
         releaseContentScannedFiles: releaseContentResult ? releaseContentResult.scannedFiles : null,
         releaseContentInspectedArchives: releaseContentResult ? releaseContentResult.inspectedArchives : null,
+        bundle: bundleReport
+            ? {
+                fileCount: bundleReport.fileCount,
+                totalBytes: bundleReport.totalBytes,
+                nestedArchives: bundleReport.nestedArchives.map((entry) => entry.path),
+                codeItems: bundleReport.codeItems.map((entry) => entry.path),
+                signing: bundleReport.signingResults,
+                entitlementKeys: bundleReport.entitlements.keys ?? null,
+                entitlementStatus: bundleReport.entitlements.status,
+            }
+            : null,
         delegatedResults,
     });
 }

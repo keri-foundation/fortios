@@ -138,6 +138,7 @@
     ],
     "exclude_files": [],
     "nested_archives": {
+      "$comment": "Scanner mechanics for the release content gate (depth and size limits). Distinct from the top-level nested_archives section, which is the approved-archive allowlist used by bundle hygiene.",
       "extensions": [
         ".zip"
       ],
@@ -148,5 +149,129 @@
         "max_total_decompressed_bytes": 536870912
       }
     }
+  },
+  "bundle_hygiene": {
+    "$comment": "Closed-world structural contract for the final application bundle: deny unknown structure rather than enumerating bad strings. Cruft rules are scoped away from WebPayload because canonical runtime content is governed by the canonical payload contract and the release content gate. Patterns are path-aware: JavaScript, Python, WASM, and wheels inside WebPayload are legitimate and are never banned by extension.",
+    "cruft_scope_excludes": [
+      "WebPayload/**"
+    ],
+    "forbidden_path_segments": [
+      ".git",
+      ".github",
+      ".svn",
+      "node_modules",
+      "coverage",
+      "DerivedData",
+      "__tests__",
+      "tests",
+      "fixtures",
+      ".build",
+      "tmp"
+    ],
+    "forbidden_file_names": [
+      ".DS_Store",
+      ".env",
+      ".gitignore",
+      ".npmrc",
+      "id_rsa",
+      "id_ed25519",
+      "id_ecdsa"
+    ],
+    "forbidden_file_patterns": [
+      "*.log",
+      "*.tmp",
+      "*.bak",
+      "*.orig",
+      "*~",
+      "*.map",
+      "*.p12",
+      "*.pfx",
+      ".env.*"
+    ]
+  },
+  "nested_archives": {
+    "$comment": "Unknown nested archives are a way for cruft or unexpected code to bypass ordinary inventory inspection, so every archive must be explicitly approved. An approved archive that cannot be inspected fails closed.",
+    "allowed": [
+      {
+        "path": "WebPayload/vendor/pyodide/314.0.5/python_stdlib.zip",
+        "purpose": "canonical runtime Python standard library (producer-owned; sanitization is FortWeb-owned)"
+      }
+    ],
+    "forbidden_extensions_outside_allowlist": [
+      ".zip",
+      ".jar",
+      ".tar",
+      ".tgz",
+      ".gz",
+      ".bz2",
+      ".xz",
+      ".7z"
+    ]
+  },
+  "executable_inventory": {
+    "$comment": "Only intended native code may ship. Pyodide WebAssembly is runtime content under canonical payload closure, not native code, and is intentionally not listed here.",
+    "allowed_executables": [
+      "KeriWallet"
+    ],
+    "allowed_code_directories": [
+      "Frameworks",
+      "PlugIns"
+    ],
+    "allowed_code_paths": [],
+    "max_code_items": 1
+  },
+  "filesystem_safety": {
+    "reject_symlinks_escaping_root": true,
+    "reject_special_files": true,
+    "reject_setuid_setgid": true,
+    "reject_world_writable": true
+  },
+  "codesign": {
+    "$comment": "Report-only by default because the CI archive lane builds with CODE_SIGNING_ALLOWED=NO (unsigned). Promote to \"required\" once a signed distribution archive is produced; per-item verification already runs and is recorded in the bill of materials.",
+    "enforcement": "report"
+  },
+  "entitlements": {
+    "$comment": "Capability contract for the signed distribution build. The allowlist below is deliberately limited to profile-issued standard keys; any capability (push, iCloud, app groups, associated domains, network extensions) must be added here deliberately when the project intends it.",
+    "enforcement": "when_available",
+    "forbidden_true_keys": [
+      "get-task-allow"
+    ],
+    "allowed_keys": [
+      "application-identifier",
+      "com.apple.developer.team-identifier",
+      "keychain-access-groups",
+      "get-task-allow",
+      "beta-reports-active"
+    ]
+  },
+  "secret_material": {
+    "$comment": "High-confidence rules only. No generic entropy scanning: minified runtime JavaScript and WASM would produce constant false positives. embedded.mobileprovision is a platform artifact inspected by signing validation, not accidental secret material.",
+    "forbidden_file_patterns": [
+      ".env",
+      ".env.*",
+      "*.p12",
+      "*.pfx",
+      "id_rsa",
+      "id_ed25519",
+      "id_ecdsa"
+    ],
+    "forbidden_content_markers": [
+      "-----BEGIN RSA PRIVATE KEY-----",
+      "-----BEGIN EC PRIVATE KEY-----",
+      "-----BEGIN OPENSSH PRIVATE KEY-----",
+      "-----BEGIN PRIVATE KEY-----",
+      "-----BEGIN PGP PRIVATE KEY BLOCK-----"
+    ],
+    "platform_artifact_exemptions": [
+      "embedded.mobileprovision"
+    ],
+    "max_scan_bytes": 4194304
+  },
+  "size_budgets": {
+    "$comment": "Ceilings sized from intended production structure with headroom (historical bundle: ~22 MB, 176 files, 1 nested archive, largest file ~9.6 MB). They must catch an accidentally copied dependency or test tree, not harmless compiler-size drift.",
+    "max_total_bytes": 60000000,
+    "max_total_files": 400,
+    "max_nested_archives": 1,
+    "max_single_file_bytes": 20000000
   }
 }
