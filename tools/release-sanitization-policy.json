@@ -113,5 +113,40 @@
         "reason": "CI source-checkout path must not be a runtime dependency"
       }
     ]
+  },
+  "release_content_gate": {
+    "$comment": "Hard release gate for material that must not ship in an App Store archive. Unlike offline_closure (a non-fatal audit of runtime offline invariants), a finding here fails the release assertion. The gate inspects nested ZIP archives because runtime content such as the Pyodide python_stdlib.zip is opaque to a flat file walk. This policy file lives in tools/ and is not copied into the application bundle; it must stay out of any scanned root so that the marker literals below cannot themselves become artifact hits.",
+    "forbidden_markers": [
+      {
+        "pattern": "itms-services",
+        "reason": "CPython documents the itms-services URL scheme as an App Store review compatibility issue and removes that handling when built for iOS, so a generic Pyodide Python standard library must be sanitized by the canonical runtime producer before publication"
+      }
+    ],
+    "scan_extensions": [
+      ".py",
+      ".pyc",
+      ".js",
+      ".mjs",
+      ".json",
+      ".toml",
+      ".txt",
+      ".html",
+      ".css",
+      ".plist",
+      ".strings",
+      ".xml"
+    ],
+    "exclude_files": [],
+    "nested_archives": {
+      "extensions": [
+        ".zip"
+      ],
+      "limits": {
+        "max_depth": 3,
+        "max_entries_per_archive": 20000,
+        "max_member_bytes": 67108864,
+        "max_total_decompressed_bytes": 536870912
+      }
+    }
   }
 }

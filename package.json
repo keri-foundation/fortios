@@ -16,6 +16,7 @@
     "validate:runtime-requirements-compatibility": "node tools/validate-runtime-requirements-compatibility.mjs",
     "test:runtime-requirements-compatibility": "node --test tools/validate-runtime-requirements-compatibility.test.mjs",
     "verify:release-archive": "node tools/assert-release-archive.mjs",
+    "check:release-sanitization": "node tools/scan-release-content.mjs --dir WebPayload",
     "knip": "knip"
   },
   "engines": {

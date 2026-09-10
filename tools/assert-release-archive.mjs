@@ -21,6 +21,12 @@
  *   8. delegated payload validators (unless --skip-delegated-validators):
  *      assert-payload-integrity, validate-mobile-payload, assert-pyodide-runtime,
  *      validate-runtime-requirements-compatibility
+ *   9. release content gate — App Store-incompatible material must be absent
+ *      from the archived payload, inspected down to nested ZIP members (for
+ *      example the Pyodide python_stdlib.zip). A nested archive that cannot be
+ *      inspected fails the gate closed. Ownership note: when a finding is
+ *      reported, the fix belongs to the canonical producer pipeline, not to a
+ *      rewrite of the archived bytes.
  *
  * Non-fatal audit (reported, not a hard gate):
  *   offline runtime closure — CDN/localhost/file:///source-path markers in the
@@ -44,6 +50,7 @@ import { lstat, readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
+import { scanForbiddenContent } from './scan-release-content.mjs';
 
 const execFileAsync = promisify(execFile);
 
@@ -513,6 +520,39 @@ async function main() {
         console.log('[release-archive] delegated validators skipped (--skip-delegated-validators)');
     }
 
+    // Release content gate (hard): forbidden App Store-incompatible material
+    // must be absent from the archived payload, including inside nested
+    // archives such as the Pyodide python_stdlib.zip.
+    let releaseContentResult = null;
+    try {
+        releaseContentResult = await scanForbiddenContent(payloadRoot, { policyPath: opts.policy });
+        for (const finding of releaseContentResult.findings) {
+            console.log(`[release-archive] release-content finding: file=${finding.file} marker=${finding.marker}`);
+            hardErrors.push(violation(
+                'release-content',
+                finding.file,
+                `forbidden release content "${finding.marker}": ${finding.reason}`,
+                'Archived payload must not contain release-gate forbidden content; the canonical runtime producer owns the fix',
+            ));
+        }
+        for (const error of releaseContentResult.errors) {
+            console.log(`[release-archive] release-content inspection error: file=${error.file} reason=${error.reason}`);
+            hardErrors.push(violation(
+                'release-content',
+                error.file,
+                `release content could not be inspected: ${error.reason}`,
+                'Nested archive inspection must succeed; an uninspectable archive cannot be certified clean',
+            ));
+        }
+    } catch (err) {
+        hardErrors.push(violation(
+            'release-content',
+            'policy',
+            `release content gate could not run: ${err.message}`,
+            'The release content gate must run against every release archive',
+        ));
+    }
+
     // Offline closure audit (non-fatal)
     const offlineFindings = await auditOfflineClosure(payloadRoot, policy);
     const offlinePass = offlineFindings.length === 0;
@@ -529,6 +569,9 @@ async function main() {
         payloadRoot,
         offlineClosurePass: offlinePass,
         offlineClosureFindings: offlineFindings.length,
+        releaseContentFindings: releaseContentResult ? releaseContentResult.findings.length : null,
+        releaseContentScannedFiles: releaseContentResult ? releaseContentResult.scannedFiles : null,
+        releaseContentInspectedArchives: releaseContentResult ? releaseContentResult.inspectedArchives : null,
         delegatedResults,
     });
 }

@@ -369,11 +369,18 @@ Engineering governance for this repo (Swift coding, Xcode workflow, WKWebView an
 
 ## 11. App Store compliance
 
-Two issues arise from the bundled Pyodide payload. Both are handled by the canonical pipeline.
+The bundled Pyodide payload requires one producer-side sanitization before App Store submission.
 
-### `itms-services` string in `python_stdlib.zip`
+### `itms-services` handling in `python_stdlib.zip`
 
-`urllib/parse.py` inside the bundled `python_stdlib.zip` contains the string `itms-services`, which can trigger Apple's automated binary scanner and cause App Store rejection. This is patched during FortWeb's runtime packaging, before Fort-ios imports the package — Fort-ios does not post-process the payload.
+The pinned generic Pyodide Python standard library contains CPython's `itms-services` URL-scheme handling in `urllib/parse.py`. CPython documents that scheme as an App Store review compatibility issue and removes the handling when CPython is built for iOS, so a generic stdlib carries a release-compatibility risk.
+
+Fort-ios does not rewrite canonical runtime bytes. Instead:
+
+- `make release-content-check` scans the staged `WebPayload/`, descending into nested archives, for that material.
+- `tools/assert-release-archive.mjs` applies the same gate to the payload inside a release `.xcarchive`.
+
+Because the current pinned producer artifact still contains this handling, the gate reports a finding and the artifact is not App-Store-clean until the canonical runtime producer sanitizes it before publishing its manifest, digests, and package ZIP. The marker and the scan scope are declared in `tools/release-sanitization-policy.json` under `release_content_gate`.
 
 ### Privacy manifest
 
