@@ -37,7 +37,10 @@ There is no in-repo browser/JS build. The web payload is the canonical FortWeb r
 
 ### Xcode version policy
 
-Fort-ios is currently validated with **Xcode 26.4.1**.
+Hosted CI runs the `swift-tests` job with
+`DEVELOPER_DIR=/Applications/Xcode_26.5.app/Contents/Developer` and resolves an `iPhone 17 Pro`
+simulator on iOS 26.5. The latest manual verification build ran Xcode 26.6 against an iOS 26.5
+simulator.
 
 The deployment target remains **iOS 16.4** and is independent of the installed
 simulator runtime. Older Xcode compatibility has not been revalidated against
@@ -45,11 +48,11 @@ the current project format.
 
 | Attribute | Value |
 |-----------|-------|
-| Minimum supported Xcode | Not verified — last validated with 26.4.1 |
-| Currently verified Xcode | 26.4.1 |
-| Currently verified iOS SDK | 26.4 |
+| Minimum supported Xcode | Not verified; last validated with 26.4.1 |
+| Currently verified Xcode | 26.5 in CI, 26.6 for the manual verification build |
+| Currently verified iOS SDK | 26.5 |
 | Deployment target | 16.4 |
-| Currently verified simulator runtime | 26.4.1 |
+| Currently verified simulator runtime | 26.5 |
 | Swift language mode | 5 |
 | Project object version | 77 |
 
@@ -58,10 +61,17 @@ the current project format.
 ### Python runtime (bundled FortWeb payload)
 
 The Python interpreter and KERI runtime shipped inside the app are determined by
-the canonical FortWeb runtime package (Pyodide 3.14-based as of the pinned #38
-release). Fort-ios does not build or vendor Python itself; the pinned package
-manifest is validated before bundling. See
-`libs/fortweb/docs/runtime-package-contract.md` for the runtime contract.
+the canonical FortWeb runtime package. Fort-ios does not build or vendor Python
+itself; the pinned package manifest is validated before bundling.
+
+The payload this repository currently bundles comes from FortWeb release asset
+`runtime-source-pyodide-314-20260909`, built from FortWeb branch `pyodide-314-runtime` at
+`bdb81afa7593603141e8db306f0636a583d2db02`. That commit is the mobile-tested runtime source.
+FortWeb PR #38 has since advanced to `de66af9` with a newer runtime source that no mobile wrapper
+has consumed, so do not treat the #38 head as the tested artifact. See
+`libs/fortweb/docs/runtime-package-contract.md` for the producer contract, and
+`keri-notes/docs/architecture/mobile-runtime-compatibility.md` for the canonical compatibility
+matrix.
 
 ---
 
@@ -154,7 +164,7 @@ make logs-sim
 make logs-device DEVICE_REF=<udid-or-name>
 ```
 
-For conference acceptance and simulator/device parity runs, use [CONFERENCE-IOS-VALIDATION-CHECKLIST.md](libs/Fort-ios/CONFERENCE-IOS-VALIDATION-CHECKLIST.md).
+For release evidence, use [docs/app-store-submission-checklist.md](docs/app-store-submission-checklist.md). For simulator/device parity runs, use `make parity-smoke DEVICE_REF=<udid-or-name>`.
 
 Run `make help` at any time to list all available targets.
 
@@ -236,8 +246,13 @@ FortWeb package:runtime  →  fortweb-runtime-0.0.0.zip  →  import-fortweb-run
 ### Determinism contract
 
 - `WebPayload/` is import output → **must not be committed**.
-- FortWeb source is pinned to a reviewed ref (`bdb81af` for #38) with a pinned
-  runtime-source manifest SHA-256 (see `.github/workflows/ios-security.yml`).
+- The runtime source is pinned to FortWeb release asset `runtime-source-pyodide-314-20260909` by
+  archive SHA-256 (`e04833249eec88596e0f2f88d32baa6d5fae6b2e964996587061ddac4bd78c72`) and
+  runtime-source manifest SHA-256
+  (`87bcc689d7778840a76284471ff599cef21be41df2b429724f7f4fdc5f022135`), built from FortWeb
+  branch `pyodide-314-runtime` at `bdb81af` (see `.github/workflows/ios-security.yml`).
+  The previous wording said "pinned to a reviewed ref (`bdb81af` for #38)", which read as if
+  `bdb81af` were the FortWeb #38 head; that head is now `de66af9` and is untested here.
 - The canonical import command is `make payload-contract FORTWEB_DIR=<checkout>`.
 
 ---
@@ -345,25 +360,34 @@ Fort-ios/
 
 ### Workspace Architecture Decision Records
 
+These ADRs are owned by the `keri-notes` workspace and live in `keri-notes/docs/adr/`. They are
+intentionally not duplicated in this repo, so they are referenced by path instead of by relative
+link (the earlier relative links under `docs/adr/` were broken after the dedup commit `86cf5b7`).
+
 | ADR | Title | Summary |
 |-----|-------|---------|
-| [ADR-022](docs/adr/ADR-022-ios-wkwebview-pyodide-bundled-payload.md) | Bundled payload decision | Why all assets are bundled at build time (no runtime download) |
-| [ADR-023](docs/adr/ADR-023-ios-wrapper-architecture.md) | iOS wrapper architecture | UIKit + WKWebView + custom scheme handler design |
-| [ADR-024](docs/adr/ADR-024-web-payload-build-bundling.md) | Web payload build & bundling | Deterministic build, `sync-payload.sh`, and bundle staging |
-| [ADR-025](docs/adr/ADR-025-ios-build-ci-developer-workflow.md) | iOS build/CI & developer workflow | VS Code + `xcodebuild` golden path, CI recipe |
-| [ADR-026](docs/adr/ADR-026-ios-logging-strategy.md) | iOS logging strategy | `AppLogger`, privacy-aware OSLog usage |
-| [ADR-031](docs/adr/ADR-031-cross-platform-shared-web-payload.md) | Cross-platform shared web payload | Thin native wrappers around one shared web payload |
-| [ADR-051](docs/adr/ADR-051-android-native-wrapper-thin-webview-host.md) | Android thin host | Current Android wrapper posture aligned with the iOS thin-host goal |
+| `ADR-022-ios-wkwebview-pyodide-bundled-payload.md` | Bundled payload decision | Why all assets are bundled at build time (no runtime download) |
+| `ADR-023-ios-wrapper-architecture.md` | iOS wrapper architecture | UIKit + WKWebView + custom scheme handler design |
+| `ADR-024-web-payload-build-bundling.md` | Web payload build & bundling | Deterministic build and bundle staging |
+| `ADR-025-ios-build-ci-developer-workflow.md` | iOS build/CI & developer workflow | VS Code + `xcodebuild` golden path, CI recipe |
+| `ADR-026-ios-logging-strategy.md` | iOS logging strategy | `AppLogger`, privacy-aware OSLog usage |
+| `ADR-031-cross-platform-shared-web-payload.md` | Cross-platform shared web payload | Thin native wrappers around one shared web payload |
+| `ADR-051-android-native-wrapper-thin-webview-host.md` | Android thin host | Android wrapper posture aligned with the iOS thin-host goal |
 
 ### Governance
 
 Engineering governance for this repo (Swift coding, Xcode workflow, WKWebView and payload rules) is owned by the `keri-notes` workspace and routed by `applyTo` globs; it is intentionally not duplicated inside this fork. See `keri-notes/.github/instructions/`.
 
-### Conference validation
+### Release and acceptance evidence
 
 | File | Purpose |
 |------|---------|
-| [CONFERENCE-IOS-VALIDATION-CHECKLIST.md](CONFERENCE-IOS-VALIDATION-CHECKLIST.md) | End-to-end simulator and physical-device validation script for conference acceptance |
+| `docs/app-store-submission-checklist.md` | Gate lanes, manual App Store items, export compliance, and known blockers |
+| `keri-notes/docs/architecture/mobile-runtime-compatibility.md` | Canonical runtime compatibility and acceptance matrix for both mobile consumers |
+
+The `CONFERENCE-IOS-VALIDATION-CHECKLIST.md` and `CONFERENCE-IOS-VALIDATION-RUNS.md` files that
+earlier revisions of this README referenced were removed in `2b67924` and do not exist in this
+repository.
 
 ---
 
