@@ -34,7 +34,7 @@ DEVICE_REF    ?=
 # FortWeb-driven Xcode preparation
 XCODE_READY_TESTS ?= 1
 
-.PHONY: help setup payload-contract payload-package payload-import bridge-check ios-doctor ios-resolve-sim ios-list-sims ios-list-devices xcode-ready run-sim build test-swift test-swift-build test-swift-run test-tools test-all open lint generated-check clean clean-payload clean-all doctor archive archive-structural archive-verify export upload
+.PHONY: help setup payload-contract payload-package payload-import bridge-check ios-doctor ios-resolve-sim ios-list-sims ios-list-devices xcode-ready run-sim build test-swift test-swift-build test-swift-run test-tools test-all open lint lint-baseline generated-check clean clean-payload clean-all doctor archive archive-structural archive-verify export upload
 
 help: ## Show available make targets
 	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | \
@@ -260,8 +260,11 @@ test-all: test-swift test-tools ## Run Swift + Node tool tests
 open: ## Open KeriWallet.xcodeproj in Xcode
 	open $(XCODE_PROJECT)
 
-lint: ## Run SwiftLint on all Swift sources (--strict)
-	cd $(CURDIR) && swiftlint lint --config .swiftlint.yml --strict
+lint: ## Run SwiftLint with the frozen backlog baseline (fails on NEW violations)
+	cd $(CURDIR) && swiftlint lint --config .swiftlint.yml --strict --baseline .swiftlint-baseline.json
+
+lint-baseline: ## Regenerate the SwiftLint violation baseline (only when deliberately removing debt)
+	cd $(CURDIR) && swiftlint lint --config .swiftlint.yml --write-baseline .swiftlint-baseline.json
 
 generated-check: ## Verify generated bridge contracts are current and deterministic
 	npm run bridge:check

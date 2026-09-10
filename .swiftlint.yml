@@ -1,19 +1,23 @@
 # ── SwiftLint Configuration ─────────────────────────────────────────────────
 # Rationale: ADR-028 — iOS SwiftLint & Type-Inference Strategy
 # Installed via: brew install swiftlint (v0.63.2+)
-# Run:          make lint   (from projects/ios-wrapper/)
+# Run:          make lint   (from the repository root)
 # VS Code:      vknabel.vscode-swiftlint extension runs on save
 # ────────────────────────────────────────────────────────────────────────────
 
 # Only lint our own Swift source — not DerivedData, build artifacts, etc.
+# Paths are repository-root-relative. The Xcode project lives at
+# KeriWallet.xcodeproj/ and first-party Swift sources live in the three
+# directories below; the former xcodeproj/KeriWallet/... sources were relocated
+# to the repository root.
 included:
-  - xcodeproj/KeriWallet/KeriWallet
-  - xcodeproj/KeriWallet/KeriWalletTests
-  - xcodeproj/KeriWallet/KeriWalletUITests
+  - KeriWallet
+  - KeriWalletTests
+  - KeriWalletUITests
 
 # Exclude auto-generated files (codegen output would trigger false positives)
 excluded:
-  - xcodeproj/KeriWallet/KeriWallet/BridgeContract.swift
+  - KeriWallet/BridgeContract.swift
 
 # ── Opt-in Rules ────────────────────────────────────────────────────────────
 # These are OFF by default in SwiftLint; we explicitly enable them.

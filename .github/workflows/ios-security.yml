@@ -8,38 +8,48 @@ on:
     paths:
       - '.github/workflows/ios-security.yml'
       - '.tool-versions'
+      - '.swiftlint.yml'
+      - '.swiftlint-baseline.json'
       - 'Makefile'
       - 'README.md'
       - 'bridge-contract.json'
       - 'package.json'
       - 'package-lock.json'
       - 'vitest.config.ts'
+      - 'runtime-platform-config.json'
+      - 'scripts/**'
       - 'tools/**'
       - 'KeriWallet/**'
       - 'KeriWalletTests/**'
       - 'KeriWalletUITests/**'
+      - 'KeriWallet.xcodeproj/**'
       - 'generated/**'
       - 'Config/**'
-      - 'xcodeproj/**'
+      - 'ExportOptions.plist.example'
   push:
     branches:
       - main
     paths:
       - '.github/workflows/ios-security.yml'
       - '.tool-versions'
+      - '.swiftlint.yml'
+      - '.swiftlint-baseline.json'
       - 'Makefile'
       - 'README.md'
       - 'bridge-contract.json'
       - 'package.json'
       - 'package-lock.json'
       - 'vitest.config.ts'
+      - 'runtime-platform-config.json'
+      - 'scripts/**'
       - 'tools/**'
       - 'KeriWallet/**'
       - 'KeriWalletTests/**'
       - 'KeriWalletUITests/**'
+      - 'KeriWallet.xcodeproj/**'
       - 'generated/**'
       - 'Config/**'
-      - 'xcodeproj/**'
+      - 'ExportOptions.plist.example'
   workflow_dispatch:
 
 jobs:
@@ -137,6 +147,15 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
+
+      - name: Install SwiftLint
+        run: brew install swiftlint
+
+      - name: Lint Swift sources
+        # Same entrypoint as local validation: SwiftLint with the corrected
+        # source paths and the frozen backlog baseline, failing only on new
+        # violations.
+        run: make lint
 
       - name: Check out FortWeb dependency
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
