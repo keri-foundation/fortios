@@ -144,7 +144,7 @@ candidate slice, because this repository's CI archives are intentionally unsigne
 
 | Item | Status | Note |
 |---|---|---|
-| Action pinning | ACTION_PIN_UNVERIFIED (1 of 5 refs) | `actions/checkout`, `actions/setup-node`, and `actions/upload-artifact` are pinned to full commit SHAs. `actions/setup-python` still floats on `v5`: its commit SHA could not be resolved while the workflows were hardened, and inventing one is worse than recording it. `tools/__tests__/workflow-security.test.mjs` fails if any other action floats, and fails if this exception is removed without resolving the pin |
+| Action pinning | VERIFIED | Every action is pinned to a full commit SHA, including `actions/setup-python` (the `v5` tag is a lightweight tag on `a26af69b…`) and `actions/upload-artifact` (`v4.3.0`). `tools/__tests__/workflow-security.test.mjs` fails if any action floats |
 | Signing credentials in CI | NOT_APPLICABLE | Every CI archive is built with `CODE_SIGNING_ALLOWED=NO`; no certificate, key, or provisioning profile is loaded by any workflow |
 | Release evidence | VERIFIED | `release-certification.yml` uploads the assertion evidence (source commit SHA, archive SHA-256, bundle bill of materials, declaration inventory, violations) with 90-day retention |
 | Baseline regeneration in CI | VERIFIED as blocked | `.swiftlint-baseline.json` is a reviewed input. `make lint-baseline` is local-only, and the workflow contract test fails if any workflow invokes it or passes `--write-baseline` |

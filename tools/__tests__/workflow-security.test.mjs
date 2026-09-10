@@ -19,11 +19,11 @@ const repoRoot = path.resolve(import.meta.dirname, '..', '..');
 const workflowsDir = path.join(repoRoot, '.github', 'workflows');
 
 /**
- * Action refs that are known to float. Every other `uses:` must be pinned to a
- * full commit SHA. Resolving an entry here means deleting it — do not grow this
- * set to make a workflow pass.
+ * Action refs that are still allowed to float. Empty on purpose: every action
+ * used by this repository is pinned to a full commit SHA. A new floating ref
+ * must fail here rather than be added to this set.
  */
-const UNVERIFIED_ACTION_PINS = new Set(['setup-python@v5']);
+const UNVERIFIED_ACTION_PINS = new Set();
 
 const WRITE_SCOPES = [
     'contents: write',
@@ -225,9 +225,9 @@ describe('action pinning', () => {
             }
         }
 
-        // Growth means a new unpinned action; shrinkage means a pin was resolved
-        // and this list must be updated in the same change.
-        expect([...floating].sort()).toEqual([...UNVERIFIED_ACTION_PINS].sort());
+        // Non-empty means a new unpinned action appeared; this list stays empty
+        // so that pinning is the only way to make CI green.
+        expect([...floating].sort()).toEqual([]);
     });
 });
 

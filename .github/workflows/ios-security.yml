@@ -1,10 +1,9 @@
 name: iOS Security Checks
 
 # GitHub Actions hardening notes:
-#   - Every action is pinned to a full commit SHA, except actions/setup-python,
-#     which is ACTION_PIN_UNVERIFIED: its v5 commit SHA could not be resolved
-#     while this workflow was hardened. Replace the floating tag with a verified
-#     SHA as soon as the mapping can be confirmed.
+#   - Every action is pinned to a full commit SHA. The `v5` tag of
+#     actions/setup-python is a lightweight tag on commit a26af69b, so the pin
+#     records that commit rather than a moving major-version tag.
 #   - This workflow declares read-only token permissions. Repository defaults
 #     are irrelevant here because an explicit block makes every unlisted scope
 #     none.
@@ -106,7 +105,7 @@ jobs:
         run: npm ci
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: '3.12'
 
@@ -204,7 +203,7 @@ jobs:
         run: npm ci
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: '3.12'
 
@@ -327,7 +326,9 @@ jobs:
         run: npm ci
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        # ACTION_PIN_UNVERIFIED resolved: v5 is a lightweight tag on
+        # a26af69be951a213d495a4c3e4e4022e16d87065.
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: '3.12'
 
