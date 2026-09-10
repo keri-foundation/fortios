@@ -273,5 +273,124 @@
     "max_total_files": 400,
     "max_nested_archives": 1,
     "max_single_file_bytes": 20000000
+  },
+  "submission_metadata": {
+    "$comment": "What the app declares to iOS/Apple versus what it ships. Structure and reason-code values are taken from Apple's current documentation (privacy manifest files; describing use of required reason API). Hard failures cover structural faults and undeclared capabilities; advisories cover classifications that need owner intent (stale declarations, missing export-compliance declaration).",
+    "privacy_manifest": {
+      "filename": "PrivacyInfo.xcprivacy",
+      "allowed_keys": [
+        "NSPrivacyTracking",
+        "NSPrivacyTrackingDomains",
+        "NSPrivacyCollectedDataTypes",
+        "NSPrivacyAccessedAPITypes"
+      ],
+      "tracking_expected": false,
+      "known_api_categories": {
+        "NSPrivacyAccessedAPICategoryFileTimestamp": ["DDA9.1", "C617.1", "3B52.1", "0A2A.1"],
+        "NSPrivacyAccessedAPICategorySystemBootTime": ["35F9.1", "8FFB.1", "3D61.1"],
+        "NSPrivacyAccessedAPICategoryDiskSpace": ["85F4.1", "E174.1", "7D9E.1", "B728.1"],
+        "NSPrivacyAccessedAPICategoryActiveKeyboards": ["3EC4.1", "54BD.1"],
+        "NSPrivacyAccessedAPICategoryUserDefaults": ["CA92.1", "1C8F.1", "C56D.1", "AC6B.1"]
+      },
+      "required_reason_scan": {
+        "$comment": "Static pattern scan of first-party native sources. Observed categories must be declared in the manifest; declared categories with no observed use are reported as stale for owner review rather than silently removed.",
+        "source_root": "KeriWallet",
+        "source_extensions": [".swift"],
+        "categories": {
+          "NSPrivacyAccessedAPICategoryFileTimestamp": {
+            "patterns": ["attributesOfItem", "fileModificationDate", "contentModificationDateKey", "creationDateKey", "modificationDate"]
+          },
+          "NSPrivacyAccessedAPICategorySystemBootTime": {
+            "patterns": ["systemUptime", "mach_absolute_time"]
+          },
+          "NSPrivacyAccessedAPICategoryDiskSpace": {
+            "patterns": ["volumeAvailableCapacity", "systemFreeSize", "statvfs", "fstatfs"]
+          },
+          "NSPrivacyAccessedAPICategoryActiveKeyboards": {
+            "patterns": ["activeInputModes"]
+          },
+          "NSPrivacyAccessedAPICategoryUserDefaults": {
+            "patterns": ["UserDefaults"]
+          }
+        }
+      }
+    },
+    "info_plist": {
+      "$comment": "Closed-world capability contract. The product currently declares none of these capabilities, so each allowlist is empty on purpose; adding an entry is an explicit product decision.",
+      "allowed_capability_keys": [],
+      "allowed_usage_description_keys": [],
+      "allowed_url_schemes": [],
+      "allowed_query_schemes": [],
+      "allowed_background_modes": [],
+      "allowed_bonjour_services": [],
+      "allowed_document_exposure_keys": [],
+      "expected_absent_keys": [
+        "NSAppTransportSecurity",
+        "NSBonjourServices",
+        "NSLocalNetworkUsageDescription",
+        "UIBackgroundModes",
+        "CFBundleURLTypes",
+        "LSApplicationQueriesSchemes",
+        "UIFileSharingEnabled",
+        "LSSupportsOpeningDocumentsInPlace"
+      ]
+    },
+    "third_party_sdks": {
+      "$comment": "Apple requires a privacy manifest and (for binary dependencies) a signature for the SDKs listed in \"Upcoming third-party SDK requirements\". This project links no third-party native SDKs: the Xcode project declares no package references and the archived app contains a single Mach-O executable. The Pyodide Python wheels are runtime payload content under canonical payload closure, not native SDK frameworks.",
+      "apple_listed_probe_patterns": [
+        "Alamofire",
+        "FirebaseCore",
+        "OpenSSL",
+        "BoringSSL",
+        "openssl_grpc",
+        "Protobuf",
+        "SnapKit",
+        "Lottie",
+        "OneSignal",
+        "SDWebImage",
+        "RealmSwift",
+        "UnityFramework",
+        "Flutter",
+        "Capacitor",
+        "Cordova"
+      ],
+      "expected_native_dependencies": [],
+      "distribution_signature_proof": "DEFERRED_TO_RELEASE_CANDIDATE"
+    },
+    "export_compliance": {
+      "$comment": "Evidence only. Fort-ios ships cryptographic functionality (KERI cryptography and system TLS), so this records what is bundled for a human to answer Apple's export-compliance determination. This file must never be treated as a legal determination.",
+      "info_plist_key": "ITSAppUsesNonExemptEncryption",
+      "disposition": "EXPORT_COMPLIANCE_OWNER_REVIEW_REQUIRED",
+      "crypto_components": [
+        {
+          "component": "Apple system TLS (WKWebView / URLSession)",
+          "purpose": "HTTPS transport for wallet services",
+          "family": "TLS 1.2+",
+          "system_or_bundled": "system",
+          "standard_or_custom": "standard"
+        },
+        {
+          "component": "keri (bundled wheel)",
+          "purpose": "KERI key events, CESR signing/verification, pre-rotation",
+          "family": "Ed25519/ECDSA via libsodium-backed primitives",
+          "system_or_bundled": "bundled (WASM)",
+          "standard_or_custom": "standard algorithms, custom protocol"
+        },
+        {
+          "component": "pysodium (bundled wheel)",
+          "purpose": "cryptographic primitives for KERI operations",
+          "family": "libsodium",
+          "system_or_bundled": "bundled (WASM)",
+          "standard_or_custom": "standard"
+        },
+        {
+          "component": "cryptography / cffi (bundled wheels)",
+          "purpose": "Keystore and key material handling in the runtime",
+          "family": "OpenSSL-backed primitives",
+          "system_or_bundled": "bundled (WASM)",
+          "standard_or_custom": "standard"
+        }
+      ]
+    }
   }
 }

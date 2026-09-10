@@ -19,5 +19,10 @@
     "!DerivedData/**",
     "!dist/**",
     "!node_modules/**"
+  ],
+  // Platform binaries invoked by validators. `plutil` is Apple's own property-list
+  // tool and is the authoritative reader for PrivacyInfo.xcprivacy / Info.plist.
+  "ignoreBinaries": [
+    "plutil"
   ]
 }

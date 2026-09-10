@@ -51,6 +51,52 @@ function buildPayloadTree(root) {
     ]);
 }
 
+// The release assertion evaluates submission declarations as well as payload
+// bytes, so the fixture has to ship the same declaration surfaces a real
+// archive ships: a generated Info.plist and a bundled privacy manifest.
+// FileTimestamp/C617.1 mirrors first-party usage in this repository
+// (attributesOfItem in PayloadSchemeHandler.swift).
+const APP_INFO_PLIST = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key>
+  <string>org.keri.fort.fixture</string>
+  <key>CFBundleExecutable</key>
+  <string>KeriWallet</string>
+  <key>CFBundleShortVersionString</key>
+  <string>1.0</string>
+  <key>CFBundleVersion</key>
+  <string>1</string>
+  <key>MinimumOSVersion</key>
+  <string>16.4</string>
+</dict>
+</plist>
+`;
+
+const APP_PRIVACY_MANIFEST = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>NSPrivacyTracking</key>
+  <false/>
+  <key>NSPrivacyCollectedDataTypes</key>
+  <array/>
+  <key>NSPrivacyAccessedAPITypes</key>
+  <array>
+    <dict>
+      <key>NSPrivacyAccessedAPIType</key>
+      <string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
+      <key>NSPrivacyAccessedAPITypeReasons</key>
+      <array>
+        <string>C617.1</string>
+      </array>
+    </dict>
+  </array>
+</dict>
+</plist>
+`;
+
 async function buildFixtureArchive() {
     const root = await makeTempDir();
     const archivePath = path.join(root, 'KeriWallet.xcarchive');
@@ -58,8 +104,9 @@ async function buildFixtureArchive() {
     const payloadRoot = path.join(appPath, 'WebPayload');
     const referenceRoot = path.join(root, 'reference-payload');
 
-    await writeTextFile(path.join(archivePath, 'Info.plist'), '<?xml version="1.0"?><plist version="1.0"></plist>\n');
-    await writeTextFile(path.join(appPath, 'Info.plist'), '<?xml version="1.0"?><plist version="1.0"></plist>\n');
+    await writeTextFile(path.join(archivePath, 'Info.plist'), APP_INFO_PLIST);
+    await writeTextFile(path.join(appPath, 'Info.plist'), APP_INFO_PLIST);
+    await writeTextFile(path.join(appPath, 'PrivacyInfo.xcprivacy'), APP_PRIVACY_MANIFEST);
     await writeTextFile(path.join(appPath, 'KeriWallet'), 'fake-mach-o-binary');
 
     await buildPayloadTree(payloadRoot);
@@ -152,6 +199,15 @@ describe('assert-release-archive.mjs', () => {
 
         const error = await runVerifierExpectFailure(archivePath, referenceRoot);
         expect(error.stdout).toContain('unexpected symlink in archived payload');
+        expect(error.stdout).toContain('[release-archive] result: FAIL');
+    });
+
+    it('fails closed when the bundled privacy manifest is absent (NEGATIVE_MISSING_PRIVACY_MANIFEST)', async () => {
+        const { archivePath, appPath, referenceRoot } = await buildFixtureArchive();
+        await rm(path.join(appPath, 'PrivacyInfo.xcprivacy'));
+
+        const error = await runVerifierExpectFailure(archivePath, referenceRoot);
+        expect(error.stdout).toContain('privacy manifest is missing or unreadable');
         expect(error.stdout).toContain('[release-archive] result: FAIL');
     });
 });

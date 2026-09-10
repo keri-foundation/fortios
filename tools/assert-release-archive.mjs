@@ -52,6 +52,7 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { scanForbiddenContent } from './scan-release-content.mjs';
 import { inspectBundle } from './bundle-hygiene.mjs';
+import { evaluateSubmissionMetadata, loadPlist } from './submission-metadata.mjs';
 
 const execFileAsync = promisify(execFile);
 
@@ -412,6 +413,60 @@ async function auditOfflineClosure(payloadRoot, policy) {
 
 // --- delegated validators ------------------------------------------------
 
+/**
+ * Collect first-party native sources named by the required-reason scan policy so
+ * observed API usage can be compared against privacy-manifest declarations.
+ */
+async function collectRequiredReasonSources(scanPolicy) {
+    const root = path.join(REPO_ROOT, scanPolicy.source_root ?? '');
+    const extensions = scanPolicy.source_extensions ?? [];
+    const sources = {};
+
+    async function walk(dir) {
+        for (const entry of await readdir(dir, { withFileTypes: true })) {
+            const abs = path.join(dir, entry.name);
+            if (entry.isDirectory()) {
+                await walk(abs);
+                continue;
+            }
+            if (!entry.isFile()) continue;
+            if (!extensions.some((extension) => entry.name.endsWith(extension))) continue;
+            sources[path.relative(REPO_ROOT, abs)] = await readFile(abs, 'utf8');
+        }
+    }
+
+    await walk(root);
+    return sources;
+}
+
+/**
+ * Evaluate the declaration surfaces of the archived application: the bundled
+ * privacy manifest, the final generated Info.plist, and first-party API usage.
+ */
+async function evaluateBundleSubmissionMetadata(appPath, policy) {
+    const section = policy.submission_metadata ?? {};
+    const manifestPath = path.join(appPath, section.privacy_manifest?.filename ?? 'PrivacyInfo.xcprivacy');
+    const infoPlistPath = path.join(appPath, 'Info.plist');
+
+    let privacyManifest;
+    try {
+        privacyManifest = await loadPlist(manifestPath);
+    } catch (e) {
+        throw new Error(`privacy manifest is missing or unreadable at ${manifestPath}: ${e.message.split('\n')[0]}`);
+    }
+
+    let infoPlist;
+    try {
+        infoPlist = await loadPlist(infoPlistPath);
+    } catch (e) {
+        throw new Error(`Info.plist is missing or unreadable at ${infoPlistPath}: ${e.message.split('\n')[0]}`);
+    }
+
+    const sources = await collectRequiredReasonSources(section.privacy_manifest?.required_reason_scan ?? {});
+
+    return evaluateSubmissionMetadata({ privacyManifest, infoPlist, sources, policy: section });
+}
+
 async function runDelegatedValidator(script, args) {
     try {
         const { stdout, stderr } = await execFileAsync('node', [script, ...args], {
@@ -521,6 +576,27 @@ async function main() {
         console.log('[release-archive] delegated validators skipped (--skip-delegated-validators)');
     }
 
+    // Submission metadata (hard + advisory): what the app declares to iOS and
+    // Apple versus what it actually ships.
+    let submissionReport = null;
+    try {
+        submissionReport = await evaluateBundleSubmissionMetadata(appPath, policy);
+        for (const finding of submissionReport.findings) {
+            console.log(`[release-archive] ${finding.invariant} finding: path=${finding.path} reason=${finding.reason}`);
+            hardErrors.push(violation(finding.invariant, finding.path, finding.reason, 'Submission declarations must match the shipped build'));
+        }
+        for (const advisory of submissionReport.advisories) {
+            console.log(`[release-archive] advisory (${advisory.invariant}): path=${advisory.path} reason=${advisory.reason}`);
+        }
+    } catch (err) {
+        hardErrors.push(violation(
+            'submission_metadata',
+            'policy',
+            `submission metadata gate could not run: ${err.message}`,
+            'Declaration surfaces must be inspectable for every release archive',
+        ));
+    }
+
     // Structural bundle hygiene (hard): closed-world contracts for the final
     // application bundle. Unknown structure is denied rather than enumerated.
     let bundleReport = null;
@@ -607,6 +683,7 @@ async function main() {
                 entitlementStatus: bundleReport.entitlements.status,
             }
             : null,
+        submission: submissionReport ? submissionReport.details : null,
         delegatedResults,
     });
 }
