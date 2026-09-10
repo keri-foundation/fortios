@@ -207,6 +207,22 @@ describe('SwiftLint coverage and enforcement', () => {
         }
     });
 
+    it('records baseline paths relative to the checkout', () => {
+        const baseline = JSON.parse(readFileSync(baselinePath, 'utf-8'));
+
+        // A baseline entry only suppresses a violation when its path resolves to
+        // the file being linted. Absolute entries bake in the machine that wrote
+        // them, so a baseline generated inside a temporary worktree matches
+        // nothing in CI and every approved violation leaks at once. That is a
+        // silent, total failure of the freeze, so the path form is asserted here.
+        for (const entry of baseline) {
+            expect(
+                entry.violation.location.file,
+                'baseline paths must be checkout-relative',
+            ).not.toMatch(/^\//);
+        }
+    });
+
     it('lints every first-party Swift file found in the repository', () => {
         const included = swiftlintList('included');
         const sources = listSwiftSources();

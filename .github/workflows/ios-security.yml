@@ -175,14 +175,41 @@ jobs:
         with:
           persist-credentials: false
 
+      # Lint asks "did THIS pull request add lint debt beyond its reviewed
+      # baseline?", so it reads the pull-request head. Every step from the
+      # FortWeb checkout down asks "does this pull request still work when merged
+      # into main?", so it keeps the merge-result checkout that GitHub creates.
+      # Those are different questions that need different trees: a frozen
+      # baseline belongs to the pull-request source, and a moving main must not
+      # be able to invalidate it. Do not collapse the two back into one checkout.
+      - name: Check out pull-request head for linting
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: .pr-head-lint
+          persist-credentials: false
+          fetch-depth: 1
+
       - name: Install SwiftLint
         run: brew install swiftlint
 
-      - name: Lint Swift sources
-        # Same entrypoint as local validation: SwiftLint with the corrected
-        # source paths and the frozen backlog baseline, failing only on new
-        # violations. Baselines are reviewed inputs: CI consumes them and never
-        # regenerates them. `make lint-baseline` is a local-only target.
+      - name: Lint pull-request sources
+        if: github.event_name == 'pull_request'
+        # Same entrypoint as local validation: SwiftLint over the pull-request
+        # head with the frozen backlog baseline, failing only on new violations.
+        # The lint tree is removed afterwards so a nested checkout cannot affect
+        # repository scanning or Xcode build discovery in the steps below.
+        run: |
+          set -euxo pipefail
+          trap 'rm -rf .pr-head-lint' EXIT
+          make -C .pr-head-lint lint
+
+      - name: Lint checked-out sources
+        if: github.event_name != 'pull_request'
+        # Push and manual dispatch have no pull-request head, so lint measures
+        # the checked-out commit. Baselines are reviewed inputs: CI consumes
+        # them and never regenerates them.
         run: make lint
 
       - name: Check out FortWeb dependency
@@ -252,14 +279,21 @@ jobs:
 
       - name: Collect native bundle failure diagnostics
         if: failure()
+        # Best effort only. The primary failure may have happened before a
+        # simulator existed (a lint failure, for example), so simulator logs are
+        # collected only when the destination was already resolved. A diagnostic
+        # step must never add a second, misleading failure of its own.
+        env:
+          # Empty whenever the run failed before the destination was resolved.
+          RESOLVED_SIM_UDID: ${{ steps.resolve-sim.outputs.sim_udid }}
         run: |
-          set -euxo pipefail
-          SIM_UDID="$(python3 ./scripts/resolve-ios-simulator.py --udid)"
+          set -uxo pipefail
+          SIM_UDID="$RESOLVED_SIM_UDID"
           echo "::group::Simulator logs (last 200 lines)"
           if [ -n "$SIM_UDID" ]; then
             xcrun simctl spawn "$SIM_UDID" log show --last 2m --predicate 'subsystem CONTAINS "com.apple.dt.XCTest" OR process CONTAINS "KeriWallet"' 2>/dev/null | tail -200 || echo "SIM_LOG_FAILED"
           else
-            echo "NO_SIM_UDID"
+            echo "NO_SIMULATOR_AVAILABLE_FOR_DIAGNOSTICS"
           fi
           echo "::endgroup::"
 

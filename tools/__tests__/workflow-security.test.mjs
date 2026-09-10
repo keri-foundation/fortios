@@ -363,3 +363,51 @@ describe('release certification lane', () => {
         }
     });
 });
+
+describe('lint source versus merge-result source', () => {
+    const prLane = () => readWorkflow('ios-security.yml');
+
+    it('lints the pull-request head against its frozen baseline', () => {
+        const steps = listBlocks(prLane()).filter((block) => /head for linting/.test(block));
+
+        expect(steps, 'exactly one PR-head lint checkout must exist').toHaveLength(1);
+        expect(steps[0]).toContain('ref: ${{ github.event.pull_request.head.sha }}');
+        expect(steps[0]).toContain('persist-credentials: false');
+        expect(steps[0]).toContain('path: .pr-head-lint');
+        expect(steps[0]).toContain("if: github.event_name == 'pull_request'");
+
+        const commands = runCommands(prLane());
+        expect(commands, 'the PR lane must lint the PR head').toContain('make -C .pr-head-lint lint');
+        // The extra checkout is disposable: leaving a nested copy of the
+        // repository behind can affect repository scanning and build discovery.
+        expect(commands).toContain("trap 'rm -rf .pr-head-lint' EXIT");
+    });
+
+    it("keeps native testing on GitHub's merge result", () => {
+        const swiftTests = jobsOf(prLane()).find((job) => job.name === 'swift-tests');
+
+        expect(swiftTests, 'the swift-tests job must exist').toBeTruthy();
+
+        const primary = listBlocks(swiftTests.body)
+            .filter((block) => block.startsWith('      - name: Check out repository'));
+
+        expect(primary, 'the job must check out the repository once').toHaveLength(1);
+        expect(primary[0]).toContain('persist-credentials: false');
+        // No ref override means the merge result, which is what integration
+        // testing must measure.
+        expect(primary[0]).not.toContain('ref:');
+        expect(swiftTests.body).toContain('xcodebuild test');
+    });
+
+    it('collects failure diagnostics without a simulator when one was never resolved', () => {
+        const steps = listBlocks(prLane()).filter((block) => /Collect native bundle failure diagnostics/.test(block));
+
+        expect(steps).toHaveLength(1);
+        expect(steps[0]).toContain('if: failure()');
+        expect(steps[0]).toContain('NO_SIMULATOR_AVAILABLE_FOR_DIAGNOSTICS');
+        // Re-running the resolver here is what turned an early lint failure into
+        // a second, misleading failure of its own.
+        expect(steps[0], 'diagnostics must not re-resolve the simulator').not.toContain('resolve-ios-simulator.py');
+        expect(steps[0], 'diagnostics must not abort on the first failing command').not.toMatch(/set -e/);
+    });
+});
