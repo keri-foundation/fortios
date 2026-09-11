@@ -4,6 +4,11 @@ final class KeriWalletUITests: XCTestCase {
 
     private var app: XCUIApplication!
 
+    /// Passcode of the vault that must be seeded outside the test on this
+    /// simulator. The unlocked-vault tests need that external prerequisite and
+    /// skip explicitly when it is absent rather than passing vacuously.
+    private static let seededVaultPasscode = "0123456789abcdefghijk"
+
     override func setUp() {
         super.setUp()
         continueAfterFailure = false
@@ -148,16 +153,14 @@ final class KeriWalletUITests: XCTestCase {
 
     // MARK: - Tab Bar Interaction
 
-    func test_tab_bar_links_are_tappable() {
+    func test_tab_bar_links_are_tappable() throws {
         let webView = app.webViews.firstMatch
         guard webView.waitForExistence(timeout: 30) else {
             XCTFail("WKWebView did not appear")
             return
         }
 
-        guard navigateToUnlockedVault(webView: webView) else {
-            return
-        }
+        try navigateToUnlockedVault(webView: webView)
 
         let tabLabels = ["Identifiers", "Remotes", "Foundation", "Settings"]
         for label in tabLabels {
@@ -170,16 +173,14 @@ final class KeriWalletUITests: XCTestCase {
         }
     }
 
-    func test_settings_tab_renders_settings_page() {
+    func test_settings_tab_renders_settings_page() throws {
         let webView = app.webViews.firstMatch
         guard webView.waitForExistence(timeout: 30) else {
             XCTFail("WKWebView did not appear")
             return
         }
 
-        guard navigateToUnlockedVault(webView: webView) else {
-            return
-        }
+        try navigateToUnlockedVault(webView: webView)
 
         let settingsTab = webView.links["Settings"]
         guard settingsTab.waitForExistence(timeout: 10) else {
@@ -204,16 +205,14 @@ final class KeriWalletUITests: XCTestCase {
 
     // MARK: - Lock Vault
 
-    func test_lock_button_returns_to_unlock_screen() {
+    func test_lock_button_returns_to_unlock_screen() throws {
         let webView = app.webViews.firstMatch
         guard webView.waitForExistence(timeout: 30) else {
             XCTFail("WKWebView did not appear")
             return
         }
 
-        guard navigateToUnlockedVault(webView: webView) else {
-            return
-        }
+        try navigateToUnlockedVault(webView: webView)
 
         let lockButton = webView.buttons["Lock vault"]
         guard lockButton.waitForExistence(timeout: 10) else {
@@ -239,40 +238,60 @@ final class KeriWalletUITests: XCTestCase {
         webView.buttons.matching(identifier: "Open Vault").firstMatch
     }
 
-    /// Attempts to navigate from the vault picker into an unlocked vault.
-    /// Returns `false` if no vault exists (test will be silently skipped).
-    @discardableResult
-    private func navigateToUnlockedVault(webView: XCUIElement) -> Bool {
+    /// Navigates from the vault picker into an unlocked vault.
+    ///
+    /// These tests need a vault that was seeded outside the test on this
+    /// simulator (passcode above). When none is present this throws `XCTSkip`
+    /// with a precise reason, because the prerequisite is an external condition
+    /// the test does not own and real vault creation is blocked on the upstream
+    /// canonical runtime (see `test_vault_survives_termination_and_relaunch`).
+    ///
+    /// Previously this returned `false` and every caller returned early, so
+    /// these three tests reported PASS on a fresh simulator without executing a
+    /// single assertion. A failure after the prerequisite exists stays a real
+    /// failure, not a skip.
+    private func navigateToUnlockedVault(webView: XCUIElement) throws {
         let openButton = firstOpenVaultButton(in: webView)
         let returnButton = webView.buttons["Return to Vault"]
 
         if returnButton.waitForExistence(timeout: 15) {
             returnButton.tap()
-            let tabBar = webView.links["Identifiers"]
-            return tabBar.waitForExistence(timeout: 15)
+            XCTAssertTrue(
+                webView.links["Identifiers"].waitForExistence(timeout: 15),
+                "Return to Vault did not reach the vault tab bar"
+            )
+            return
         }
 
         guard openButton.waitForExistence(timeout: 5) else {
-            return false
+            throw XCTSkip(
+                "No vault is present on this simulator, so the unlocked-vault "
+                    + "prerequisite for this test is unavailable. Vault creation is "
+                    + "blocked on the upstream canonical runtime; see "
+                    + "test_vault_survives_termination_and_relaunch for the real flow."
+            )
         }
 
         openButton.tap()
 
         let passcodeField = webView.secureTextFields.firstMatch
-        guard passcodeField.waitForExistence(timeout: 10) else {
-            return false
-        }
-
+        XCTAssertTrue(
+            passcodeField.waitForExistence(timeout: 10),
+            "Unlock page passcode field was not presented for an existing vault"
+        )
         passcodeField.tap()
-        passcodeField.typeText("0123456789abcdefghijk")
+        passcodeField.typeText(Self.seededVaultPasscode)
 
         let submitButton = webView.buttons["Open"]
-        guard submitButton.waitForExistence(timeout: 5) else {
-            return false
-        }
+        XCTAssertTrue(
+            submitButton.waitForExistence(timeout: 5),
+            "Unlock page 'Open' button missing for an existing vault"
+        )
         submitButton.tap()
 
-        let identifiersTab = webView.links["Identifiers"]
-        return identifiersTab.waitForExistence(timeout: 30)
+        XCTAssertTrue(
+            webView.links["Identifiers"].waitForExistence(timeout: 30),
+            "Unlocking an existing vault did not reach the Identifiers tab"
+        )
     }
 }
