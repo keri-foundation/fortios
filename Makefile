@@ -34,7 +34,7 @@ DEVICE_REF    ?=
 # FortWeb-driven Xcode preparation
 XCODE_READY_TESTS ?= 1
 
-.PHONY: help setup payload-contract payload-package payload-import bridge-check ios-doctor ios-resolve-sim ios-list-sims ios-list-devices xcode-ready run-sim build test-swift test-swift-build test-swift-run test-tools test-all open lint lint-baseline knip repo-hygiene release-certify release-content-check generated-check clean clean-payload clean-all doctor archive archive-structural archive-verify export upload
+.PHONY: help setup payload-contract payload-package payload-import bridge-check ios-doctor ios-resolve-sim ios-list-sims ios-list-devices xcode-ready run-sim build test-swift test-swift-build test-swift-run test-tools test-resolver test-all open lint lint-baseline knip repo-hygiene release-certify release-content-check generated-check clean clean-payload clean-all doctor archive archive-structural archive-verify export upload
 
 help: ## Show available make targets
 	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | \
@@ -47,6 +47,9 @@ setup: ## Install Node dependencies (run once after clone)
 
 test-tools: ## Run Node tool tests (Vitest — payload/bridge/contract tooling)
 	npm test
+
+test-resolver: ## Run simulator resolver tests (pytest — hermetic, no simulator required)
+	python3 -m pytest scripts/__tests__/ -q
 
 bridge-check: ## Verify BridgeContract.swift and BridgeContract.kt are up to date
 	npm run bridge:check
