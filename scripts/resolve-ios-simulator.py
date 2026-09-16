@@ -203,24 +203,57 @@ def _fail(msg: str, *, candidates: list[str] | None = None) -> None:
 
 
 # ---------------------------------------------------------------------------
-# CLI
+# Live inventory acquisition
 # ---------------------------------------------------------------------------
 
+# A healthy ``simctl list`` returns in well under a second, but the first call
+# on a cold CI runner can stall while CoreSimulator starts. The budget below is
+# per attempt; the total wait is bounded by TIMEOUT * MAX_ATTEMPTS.
+SIMCTL_TIMEOUT_SECONDS = 30
+SIMCTL_MAX_ATTEMPTS = 3
+
+
+def _simctl_inventory_once(timeout: int) -> subprocess.CompletedProcess[str]:
+    """Run one bounded ``xcrun simctl`` inventory attempt."""
+    return subprocess.run(
+        ["xcrun", "simctl", "list", "devices", "available", "-j"],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+
+
 def _get_inventory() -> dict[str, Any]:
-    """Call ``xcrun simctl list devices available -j`` and return parsed JSON."""
-    try:
-        proc = subprocess.run(
-            ["xcrun", "simctl", "list", "devices", "available", "-j"],
-            capture_output=True,
-            text=True,
-            timeout=15,
-        )
-    except FileNotFoundError:
-        print("ERROR: xcrun not found. Is Xcode installed?", file=sys.stderr)
-        sys.exit(2)
-    except subprocess.TimeoutExpired:
-        print("ERROR: simctl timed out.", file=sys.stderr)
-        sys.exit(2)
+    """Call ``xcrun simctl list devices available -j`` and return parsed JSON.
+
+    A stalled first call is retried with the same bounded timeout, because an
+    unresponsive CoreSimulator service is not the same condition as a missing
+    device: the resolver never obtained an inventory, so it must not conclude
+    that no simulator exists. Determinate failures (missing ``xcrun``, non-zero
+    exit, malformed JSON) still fail closed on the first attempt.
+    """
+    for attempt in range(1, SIMCTL_MAX_ATTEMPTS + 1):
+        try:
+            proc = _simctl_inventory_once(SIMCTL_TIMEOUT_SECONDS)
+        except FileNotFoundError:
+            print("ERROR: xcrun not found. Is Xcode installed?", file=sys.stderr)
+            sys.exit(2)
+        except subprocess.TimeoutExpired:
+            if attempt < SIMCTL_MAX_ATTEMPTS:
+                print(
+                    f"WARNING: simctl did not respond within {SIMCTL_TIMEOUT_SECONDS}s "
+                    f"(attempt {attempt}/{SIMCTL_MAX_ATTEMPTS}); retrying.",
+                    file=sys.stderr,
+                )
+                continue
+            print(
+                f"ERROR: simctl timed out after {SIMCTL_MAX_ATTEMPTS} attempts of "
+                f"{SIMCTL_TIMEOUT_SECONDS}s each. CoreSimulator did not become "
+                "responsive; the simulator inventory was never obtained.",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        break
 
     if proc.returncode != 0:
         print(f"ERROR: simctl failed (exit {proc.returncode}):\n{proc.stderr}", file=sys.stderr)
@@ -232,6 +265,10 @@ def _get_inventory() -> dict[str, Any]:
         print(f"ERROR: simctl output is not valid JSON: {exc}", file=sys.stderr)
         sys.exit(2)
 
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Resolve a single iOS Simulator UDID.")
