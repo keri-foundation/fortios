@@ -109,6 +109,17 @@ jobs:
         with:
           python-version: '3.12'
 
+      # Resolver unit tests are hermetic: the simctl subprocess boundary is
+      # mocked, so they belong on this Linux job rather than the macOS lane.
+      # Command chain (follow it, do not grep for 'pytest'):
+      #   this step -> make test-resolver -> python3 -m pytest scripts/__tests__/ -q
+      # pytest is pinned: 9.0.2 declares Requires-Python >=3.10, covering 3.12.
+      - name: Install pytest
+        run: python3 -m pip install --disable-pip-version-check pytest==9.0.2
+
+      - name: Run simulator resolver tests (pytest)
+        run: make test-resolver
+
       - name: Build canonical FortWeb runtime
         run: |
           npm ci --prefix "$FORTWEB_DIR"
