@@ -7,5 +7,5 @@ KERI Fort mobile application shell for iOS.
    :maxdepth: 2
    :caption: Contents
 
-.. include:: ../README.md
-   :parser: myst_parser.sphinx_
+   developer-guide
+   app-store-submission-checklist

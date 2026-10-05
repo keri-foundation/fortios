@@ -1,0 +1,242 @@
+# Fort-ios developer guide
+
+This guide contains the detailed setup and tooling reference for contributors.
+For the short project overview and common entry points, see the repository README.
+
+## Requirements
+
+- macOS and Xcode 26.5 with the iOS 26.5 SDK and Simulator runtime. The app
+  deployment target is iOS 16.4.
+- mise and Node 22.12.0, as pinned in `.tool-versions`.
+- Python 3.12 for the FortWeb runtime-source acquisition and build tools.
+- SwiftLint for `make lint`.
+
+The app runtime is separate from the host Python used by these tools. The
+bundled FortWeb package contains Pyodide 314.0.5 and Python 3.14.2.
+
+## Prepare the FortWeb runtime
+
+`make payload-contract` packages and imports the FortWeb runtime. A clean
+FortWeb checkout does not already contain the acquired runtime source or its
+built `dist/runtime` directory. The following procedure reproduces the inputs
+used by iOS Security Checks.
+
+### Source pins and ownership
+
+The values below are verified in the Fort-ios Makefile and
+`.github/workflows/ios-security.yml`:
+
+| Input | Value | Owner |
+|-------|-------|-------|
+| FortWeb producer checkout | `bdb81afa7593603141e8db306f0636a583d2db02` | CI workflow |
+| Runtime source release | `runtime-source-pyodide-314-20260909` | CI workflow |
+| Runtime source archive URL | `https://github.com/keri-foundation/fortweb/releases/download/runtime-source-pyodide-314-20260909/runtime-source.tar.gz` | CI workflow |
+| Runtime source archive SHA-256 | `e04833249eec88596e0f2f88d32baa6d5fae6b2e964996587061ddac4bd78c72` | CI workflow |
+| Runtime source manifest path | `build/runtime-source/manifest.json` | Makefile and CI workflow |
+| Runtime source manifest SHA-256 | `87bcc689d7778840a76284471ff599cef21be41df2b429724f7f4fdc5f022135` | Makefile and CI workflow |
+
+The Makefile defaults `FORTWEB_RUNTIME_SOURCE_MANIFEST_SHA256` for local
+packaging. It does not pin the FortWeb checkout commit or source archive hash.
+CI separately pins the producer commit, archive URL and hash, and manifest
+hash. Keep these roles distinct when updating producer inputs.
+
+### Obtain and prepare the producer
+
+Run these commands from the Fort-ios repository root. If `../fortweb` already
+exists, verify its remote and checkout before using it.
+
+```sh
+git clone https://github.com/keri-foundation/fortweb.git ../fortweb
+git -C ../fortweb checkout bdb81afa7593603141e8db306f0636a583d2db02
+npm ci
+npm ci --prefix ../fortweb
+python3.12 -m venv ../fortweb/.venv
+source ../fortweb/.venv/bin/activate
+```
+
+Keep the virtual environment active for the remaining commands. The producer
+scripts use `python3`; with the environment active, package installation stays
+inside the FortWeb checkout's ignored `.venv` instead of changing the global
+Python installation or adding an environment to Fort-ios.
+
+Set the inputs used by the producer build:
+
+```sh
+export FORTWEB_DIR=../fortweb
+export FORTWEB_RUNTIME_SOURCE_URL=https://github.com/keri-foundation/fortweb/releases/download/runtime-source-pyodide-314-20260909/runtime-source.tar.gz
+export FORTWEB_RUNTIME_SOURCE_ARCHIVE_SHA256=e04833249eec88596e0f2f88d32baa6d5fae6b2e964996587061ddac4bd78c72
+export FORTWEB_RUNTIME_SOURCE_MANIFEST=build/runtime-source/manifest.json
+export FORTWEB_RUNTIME_SOURCE_MANIFEST_SHA256=87bcc689d7778840a76284471ff599cef21be41df2b429724f7f4fdc5f022135
+```
+
+Acquire and verify the source archive and manifest, install the producer build
+tools from the verified local wheelhouse, and build the runtime:
+
+```sh
+(cd "$FORTWEB_DIR" && python3 scripts/acquire_runtime_source.py \
+  --url "$FORTWEB_RUNTIME_SOURCE_URL" \
+  --sha256 "$FORTWEB_RUNTIME_SOURCE_ARCHIVE_SHA256" \
+  --manifest-sha256 "$FORTWEB_RUNTIME_SOURCE_MANIFEST_SHA256" \
+  --output build/runtime-source)
+
+python3 -m pip install --disable-pip-version-check --no-index --no-deps \
+  "$FORTWEB_DIR/build/runtime-source/wheelhouse/packaging-26.1-py3-none-any.whl" \
+  "$FORTWEB_DIR/build/runtime-source/wheelhouse/setuptools-83.0.0-py3-none-any.whl" \
+  "$FORTWEB_DIR/build/runtime-source/wheelhouse/wheel-0.47.0-py3-none-any.whl"
+
+(cd "$FORTWEB_DIR" && npm run build:runtime)
+```
+
+Build and import the canonical package from the Fort-ios repository root:
+
+```sh
+make payload-contract FORTWEB_DIR="$FORTWEB_DIR"
+```
+
+This packages the FortWeb `dist/runtime` output, imports the ZIP into
+`WebPayload/`, and checks the payload contract. Run it again after changing the
+FortWeb runtime input. `WebPayload/` is generated output. Do not edit or stage
+its contents directly.
+
+## Payload import flow
+
+FortWeb produces the runtime ZIP; Fort-ios imports and validates it; Xcode
+bundles the resulting files into the app:
+
+```text
+FortWeb package:runtime
+    -> fortweb-runtime-0.0.0.zip
+    -> tools/import-fortweb-runtime-package.mjs
+    -> WebPayload/ (manifest.json and runtime files)
+    -> KeriWallet.app
+```
+
+The importer checks the manifest, file hashes, entry point, and path
+containment before replacing `WebPayload/`. `make payload-contract` runs the
+payload containment, integrity, Pyodide runtime, and mobile payload checks.
+
+## Common Make targets
+
+Run `make help` for the current complete target list.
+
+| Target | Purpose |
+|--------|---------|
+| `make setup` | Install Fort-ios Node dependencies with `npm ci` |
+| `make payload-package` | Build the FortWeb runtime ZIP |
+| `make payload-import` | Import the runtime ZIP into `WebPayload/` |
+| `make payload-contract` | Import and validate the staged payload |
+| `make xcode-ready` | Resolve a simulator, prepare a missing payload, and check contracts |
+| `make ios-doctor` | Check Xcode, simulator, and payload-source readiness |
+| `make ios-resolve-sim` | Show the selected simulator |
+| `make build` | Build KeriWallet for iOS Simulator |
+| `make run-sim` | Boot, install, and launch on the resolved simulator |
+| `make dev-device` | Build for a generic iOS device destination |
+| `make run-device DEVICE_REF=<udid-or-name>` | Install and launch on a device |
+| `make parity-smoke DEVICE_REF=<udid-or-name>` | Build, install, and launch smoke on simulator and device |
+| `make lint` | Run strict SwiftLint checks |
+| `make test-tools` | Run Node tooling tests |
+| `make test-swift` | Run Swift unit and UI tests on Simulator |
+| `make test-all` | Run Swift and Node tests |
+| `make bridge-check` | Check generated bridge contract files |
+| `make logs-sim` / `make logs-device` | Show recent app logs |
+| `make clean` | Remove derived build, test result, and package output |
+
+`parity-smoke` is build, install, and launch smoke support. It does not establish
+wallet acceptance, vault setup or unlocking, persistence, or end-to-end KERI
+acceptance.
+
+## npm scripts
+
+Use Make targets for routine work. These npm scripts are called by Make or are
+available for focused diagnostics:
+
+| Script | Purpose |
+|--------|---------|
+| `npm run bridge:check` | Check generated Swift and Kotlin bridge files |
+| `npm test` | Run the Vitest tooling suite |
+| `npm run runtime:import` | Import a canonical FortWeb runtime ZIP |
+| `npm run check:payload` | Check staged payload containment and integrity |
+| `npm run validate:runtime-platform-config` | Validate the iOS runtime platform configuration |
+| `npm run test:runtime-platform-config` | Test the runtime platform configuration validator |
+| `npm run validate:runtime-requirements-compatibility` | Validate FortWeb runtime requirements compatibility |
+| `npm run test:runtime-requirements-compatibility` | Test the compatibility validator |
+| `npm run verify:release-archive` | Check an archive contains the validated payload |
+
+## Tests and diagnostics
+
+### Swift tests
+
+`make test-swift` runs Swift unit and UI tests using `xcodebuild test`. The test
+targets use Swift Testing APIs such as `@Suite`, `@Test`, `#expect`, and
+`#require`. The app target remains in Swift 5 language mode.
+
+To choose a simulator explicitly, pass the destination to Xcode:
+
+```sh
+xcodebuild test \
+  -project KeriWallet.xcodeproj \
+  -scheme KeriWallet \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
+```
+
+### Node tooling tests
+
+`make test-tools` runs the payload import, validation, and bridge tooling tests
+with Vitest. Runtime platform and compatibility validators also have standalone
+`node --test` suites. The tools run without a browser or WebAssembly runtime.
+
+```sh
+make test-tools
+make test-all
+```
+
+For host-side diagnostics, use `make logs-sim`, `make logs-device`, or
+Console.app to inspect payload loading, bridge messages, blocked navigation,
+and scheme-handler errors.
+
+## Bridge contract
+
+`bridge-contract.json` is the committed source of truth. The generated Swift
+and Kotlin declarations are `KeriWallet/BridgeContract.swift` and
+`generated/BridgeContract.kt`. Run `make bridge-check` to verify that generated
+files match the JSON contract. The generator is
+`tools/gen-bridge-contract.mjs`.
+
+The JavaScript-to-Swift message envelope includes a type and ISO 8601 timestamp:
+
+```json
+{
+  "type": "lifecycle | js_error | log | crypto_result | unhandled_rejection",
+  "timestamp": "<ISO 8601>",
+  "message": "<optional string>"
+}
+```
+
+## Repository layout
+
+```text
+Fort-ios/
+├── KeriWallet/                 # Swift app sources and resources
+├── KeriWalletTests/            # Swift unit tests
+├── KeriWalletUITests/          # Swift UI tests
+├── KeriWallet.xcodeproj/       # Xcode project
+├── tools/                      # Payload, archive, and bridge tooling
+├── scripts/                    # Simulator and build helpers
+├── WebPayload/                 # Generated runtime bundled by Xcode
+├── generated/                  # Generated cross-platform declarations
+├── Config/                     # Xcode build configuration
+├── docs/                       # Public developer and release documentation
+├── bridge-contract.json        # Bridge contract source of truth
+├── Makefile                    # Developer commands
+├── package.json                # Node tooling scripts
+└── .tool-versions              # mise-managed Node version
+```
+
+Do not hand-edit generated bridge declarations or `WebPayload/`. Use the
+corresponding generator, importer, and contract checks.
+
+## Release documentation
+
+See the [App Store submission checklist](app-store-submission-checklist.md) for
+release requirements and the distinction between a passing archive check and
+release certification.
